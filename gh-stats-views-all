@@ -1,5 +1,10 @@
 [
   {
+    "timestamp": "2025-02-11T00:00:00Z",
+    "count": 43,
+    "uniques": 11
+  },
+  {
     "timestamp": "2025-02-10T00:00:00Z",
     "count": 11,
     "uniques": 5
