@@ -10,8 +10,7 @@
 OUTPUT := .output
 CLANG ?= clang
 LLVM_STRIP ?= llvm-strip
-LIBBPF_SRC := $(abspath ../libbpf/src)
-LIBBPF_OBJ := $(abspath $(OUTPUT)/libbpf.a)
+LIBBPF_OBJ := /usr/lib64/libbpf.a
 BINDIR := ../bin/
 ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 KERNEL := $(shell uname -r)
@@ -141,13 +140,6 @@ rpm deb: $(APPS)
 $(OUTPUT) $(OUTPUT)/libbpf:
 	$(call msg,MKDIR,$@)
 	$(Q)mkdir -p $@
-
-# Build libbpf
-$(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPUT)/libbpf
-	$(Q)$(MAKE) CROSS_COMPILE=$(CROSS_COMPILE)g -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1\
-		OBJDIR=$(dir $@)libbpf DESTDIR=$(dir $@)\
-		INCLUDEDIR= LIBDIR= UAPIDIR=\
-		install
 
 # Build BPF code
 $(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) *.h $(VMLINUX) | $(OUTPUT)
