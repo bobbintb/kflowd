@@ -15,113 +15,114 @@ jobs:
     steps:
     - name: 'Create Build Environment'
       run:  |
-        sudo apt update -y
-        sudo apt install -y libz-dev libelf-dev libcap-dev libbfd-dev libc6-dev-i386 pkg-config
-        sudo wget https://apt.llvm.org/llvm.sh
-        sudo chmod u+x llvm.sh
-        echo | sudo ./llvm.sh 16
-        sudo apt install -y clang-tidy-16
-        sudo rm -f /usr/bin/clang
-        sudo ln -s /usr/bin/clang-16 /usr/bin/clang
-        sudo rm -f /usr/bin/clang-tidy
-        sudo ln -s /usr/bin/clang-tidy-16 /usr/bin/clang-tidy
-        sudo rm -f /usr/bin/llvm-strip
-        sudo ln -s /usr/bin/llvm-strip-16 /usr/bin/llvm-strip
+        find / name vmlinux
+    #     sudo apt update -y
+    #     sudo apt install -y libz-dev libelf-dev libcap-dev libbfd-dev libc6-dev-i386 pkg-config
+    #     sudo wget https://apt.llvm.org/llvm.sh
+    #     sudo chmod u+x llvm.sh
+    #     echo | sudo ./llvm.sh 16
+    #     sudo apt install -y clang-tidy-16
+    #     sudo rm -f /usr/bin/clang
+    #     sudo ln -s /usr/bin/clang-16 /usr/bin/clang
+    #     sudo rm -f /usr/bin/clang-tidy
+    #     sudo ln -s /usr/bin/clang-tidy-16 /usr/bin/clang-tidy
+    #     sudo rm -f /usr/bin/llvm-strip
+    #     sudo ln -s /usr/bin/llvm-strip-16 /usr/bin/llvm-strip
 
-    - name: 'Prepare Cross-Compilation'
-      run:  |
-        sudo apt install -y gcc-aarch64-linux-gnu
-        sudo dpkg --add-architecture arm64
-        sudo sed -i 's/^deb http/deb [arch=amd64,i386] http/g' /etc/apt/sources.list
-        echo "deb [arch=arm64] http://ports.ubuntu.com/ focal main multiverse universe" | sudo tee -a /etc/apt/sources.list
-        echo "deb [arch=arm64] http://ports.ubuntu.com/ focal-security main multiverse universe" | sudo tee -a /etc/apt/sources.list
-        echo "deb [arch=arm64] http://ports.ubuntu.com/ focal-backports main multiverse universe" | sudo tee -a /etc/apt/sources.list
-        echo "deb [arch=arm64] http://ports.ubuntu.com/ focal-updates main multiverse universe" | sudo tee -a /etc/apt/sources.list
-        sudo apt update -y || true
-        sudo apt install -y libelf1:arm64
-        sudo apt install -y libz3-4:arm64
-        cd /usr/lib/aarch64-linux-gnu/
-        sudo ln -s libelf.so.1 libelf.so
-        sudo ln -s libz.so.1 libz.so
+    # - name: 'Prepare Cross-Compilation'
+    #   run:  |
+    #     sudo apt install -y gcc-aarch64-linux-gnu
+    #     sudo dpkg --add-architecture arm64
+    #     sudo sed -i 's/^deb http/deb [arch=amd64,i386] http/g' /etc/apt/sources.list
+    #     echo "deb [arch=arm64] http://ports.ubuntu.com/ focal main multiverse universe" | sudo tee -a /etc/apt/sources.list
+    #     echo "deb [arch=arm64] http://ports.ubuntu.com/ focal-security main multiverse universe" | sudo tee -a /etc/apt/sources.list
+    #     echo "deb [arch=arm64] http://ports.ubuntu.com/ focal-backports main multiverse universe" | sudo tee -a /etc/apt/sources.list
+    #     echo "deb [arch=arm64] http://ports.ubuntu.com/ focal-updates main multiverse universe" | sudo tee -a /etc/apt/sources.list
+    #     sudo apt update -y || true
+    #     sudo apt install -y libelf1:arm64
+    #     sudo apt install -y libz3-4:arm64
+    #     cd /usr/lib/aarch64-linux-gnu/
+    #     sudo ln -s libelf.so.1 libelf.so
+    #     sudo ln -s libz.so.1 libz.so
 
-    - name: 'Clone Repository'
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+    # - name: 'Clone Repository'
+    #   uses: actions/checkout@v4
+    #   with:
+    #     fetch-depth: 0
 
-    - name: 'Update Submodules'
-      run: |
-        git config --global --add safe.directory /__w/kflowd/kflowd
-        git submodule update --init --recursive
+    # - name: 'Update Submodules'
+    #   run: |
+    #     git config --global --add safe.directory /__w/kflowd/kflowd
+    #     git submodule update --init --recursive
 
-    - name: 'Build'
-      run: |
-        cd src
-        make CROSS_COMPILE=aarch64-linux-gnu-
-        mkdir -p arm64
-        mv ../bin/kflowd arm64/
-        make clean
-        make
-        mkdir -p x86_64
-        mv ../bin/kflowd x86_64/
+    # - name: 'Build'
+    #   run: |
+    #     cd src
+    #     make CROSS_COMPILE=aarch64-linux-gnu-
+    #     mkdir -p arm64
+    #     mv ../bin/kflowd arm64/
+    #     make clean
+    #     make
+    #     mkdir -p x86_64
+    #     mv ../bin/kflowd x86_64/
 
-    - name: 'Check with Static Code Analyzer'
-      run: |
-        cd src
-        make check
+    # - name: 'Check with Static Code Analyzer'
+    #   run: |
+    #     cd src
+    #     make check
 
-    - name: 'Build Packages'
-      run:  |
-        cd src
-        sudo echo -e "deb [trusted=yes] https://repo.goreleaser.com/apt/ /" | sudo tee /etc/apt/sources.list.d/goreleaser.list
-        sudo apt update -y || true
-        sudo apt install -y nfpm
-        make clean
-        make deb rpm CROSS_COMPILE=aarch64-linux-gnu-
-        mv *.rpm *.deb arm64/
-        make clean
-        make deb rpm
-        mv *.rpm *.deb x86_64/
+    # - name: 'Build Packages'
+    #   run:  |
+    #     cd src
+    #     sudo echo -e "deb [trusted=yes] https://repo.goreleaser.com/apt/ /" | sudo tee /etc/apt/sources.list.d/goreleaser.list
+    #     sudo apt update -y || true
+    #     sudo apt install -y nfpm
+    #     make clean
+    #     make deb rpm CROSS_COMPILE=aarch64-linux-gnu-
+    #     mv *.rpm *.deb arm64/
+    #     make clean
+    #     make deb rpm
+    #     mv *.rpm *.deb x86_64/
 
-    - name: 'Update Version'
-      run: |
-        VERSION=$(./bin/kflowd --version | cut -f2 -d\ )
-        git config user.name "GitHub Actions"
-        git config user.email "<>"
-        git checkout gh-stats
-        echo -e "{\"schemaVersion\": 1, \"label\": \"kflowd\", "\
-                "\"message\": \"$VERSION\", \"color\": \"blue\"}" > gh-stats-version.json
-        git add gh-stats-version.json
-        git commit -m "Updated json file to version $VERSION." || true
-        git push origin gh-stats
+    # - name: 'Update Version'
+    #   run: |
+    #     VERSION=$(./bin/kflowd --version | cut -f2 -d\ )
+    #     git config user.name "GitHub Actions"
+    #     git config user.email "<>"
+    #     git checkout gh-stats
+    #     echo -e "{\"schemaVersion\": 1, \"label\": \"kflowd\", "\
+    #             "\"message\": \"$VERSION\", \"color\": \"blue\"}" > gh-stats-version.json
+    #     git add gh-stats-version.json
+    #     git commit -m "Updated json file to version $VERSION." || true
+    #     git push origin gh-stats
 
-    - name: 'Create Artifacts'
-      run: |
-        cd src
-        VERSION=$(../bin/kflowd --version | cut -f2 -d\ | cut -c2-)
-        mkdir -p kflowd-$VERSION
-        mv x86_64/ arm64/ kflowd-$VERSION/
-        tar -czvf kflowd-$VERSION.tgz kflowd-$VERSION
-        rm -rf kflowd-$VERSION
-        mkdir -p ../artifacts
-        mv *.tgz ../artifacts/
-        echo -e " The tar archive contains the kflowd binary and DEB and RPM packages for x86_64 and arm64 platforms.\n"\
-                "After extracting the archive run the command matching your distribution and platform to install kflowd:\n\n"\
-                "tar xzvf kflowd-$VERSION.tgz\n\n"\
-                "cd kflowd-$VERSION/x86_64/\n"\
-                "sudo apt install ./kflowd_${VERSION}_amd64.deb    # Debian\n"\
-                "sudo yum install ./kflowd_$VERSION.x86_64.rpm   # Redhat\n\n"\
-                "cd kflowd-$VERSION/arm64/\n"\
-                "sudo apt install ./kflowd_${VERSION}_arm64.deb    # Debian\n"\
-                "sudo yum install ./kflowd-$VERSION.aarch64.rpm  # Redhat" > ../artifacts/README
+    # - name: 'Create Artifacts'
+    #   run: |
+    #     cd src
+    #     VERSION=$(../bin/kflowd --version | cut -f2 -d\ | cut -c2-)
+    #     mkdir -p kflowd-$VERSION
+    #     mv x86_64/ arm64/ kflowd-$VERSION/
+    #     tar -czvf kflowd-$VERSION.tgz kflowd-$VERSION
+    #     rm -rf kflowd-$VERSION
+    #     mkdir -p ../artifacts
+    #     mv *.tgz ../artifacts/
+    #     echo -e " The tar archive contains the kflowd binary and DEB and RPM packages for x86_64 and arm64 platforms.\n"\
+    #             "After extracting the archive run the command matching your distribution and platform to install kflowd:\n\n"\
+    #             "tar xzvf kflowd-$VERSION.tgz\n\n"\
+    #             "cd kflowd-$VERSION/x86_64/\n"\
+    #             "sudo apt install ./kflowd_${VERSION}_amd64.deb    # Debian\n"\
+    #             "sudo yum install ./kflowd_$VERSION.x86_64.rpm   # Redhat\n\n"\
+    #             "cd kflowd-$VERSION/arm64/\n"\
+    #             "sudo apt install ./kflowd_${VERSION}_arm64.deb    # Debian\n"\
+    #             "sudo yum install ./kflowd-$VERSION.aarch64.rpm  # Redhat" > ../artifacts/README
 
-    - name: 'Name Artifacts'
-      run: |
-        cd src
-        echo "ARTIFACT=kflowd-$(../bin/kflowd --version | cut -f2 -d\ | cut -c2-)" >> $GITHUB_ENV
+    # - name: 'Name Artifacts'
+    #   run: |
+    #     cd src
+    #     echo "ARTIFACT=kflowd-$(../bin/kflowd --version | cut -f2 -d\ | cut -c2-)" >> $GITHUB_ENV
 
-    - name: 'Upload Artifacts'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}
-        path: artifacts
+    # - name: 'Upload Artifacts'
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: ${{ env.ARTIFACT }}
+    #     path: artifacts
