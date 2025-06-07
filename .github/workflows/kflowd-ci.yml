@@ -9,7 +9,7 @@ on:
 
 jobs:
   ci:
-    runs-on: ubuntu-20.04
+    runs-on: ghcr.io/siwatinc/ubuntu-playground
     steps:
     - name: 'Create Build Environment'
       run:  |
