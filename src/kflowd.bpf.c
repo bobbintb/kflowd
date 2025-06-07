@@ -1897,7 +1897,12 @@ static __always_inline int handle_unix_event(void *ctx, const struct SOCK_EVENT_
         bpf_printk("WARNING: Failed to allocate app data for pid %u\n", pid);
         return 0;
     }
-    iov = (struct iovec *)BPF_CORE_READ(msg, msg_iter.iov);
+    struct iov_iter iter;
+    bpf_core_read(&iter, sizeof(iter), &msg->msg_iter);
+    iov = NULL;
+    if ((iter.iter_type & 0xf) == 1) {
+        bpf_core_read(&iov, sizeof(iov), &iter.__iov);
+    }
     segs = BPF_CORE_READ(msg, msg_iter.nr_segs);
     for (cnt = 0; cnt < segs; cnt++) {
         if (cnt >= UNIX_SEGS_MAX)
