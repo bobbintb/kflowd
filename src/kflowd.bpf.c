@@ -1893,22 +1893,23 @@ static __always_inline int handle_unix_event(void *ctx, const struct SOCK_EVENT_
 
     /* get app data */
     data = bpf_map_lookup_elem(&heap_appdata, &zero);
-    if (!data) {
-        bpf_printk("WARNING: Failed to allocate app data for pid %u\n", pid);
+    if (!data)
         return 0;
-    }
-    iov = (struct iovec *)BPF_CORE_READ(msg, msg_iter.iov);
-    segs = BPF_CORE_READ(msg, msg_iter.nr_segs);
-    for (cnt = 0; cnt < segs; cnt++) {
-        if (cnt >= UNIX_SEGS_MAX)
+    
+    if (!iov || segs <= 0)
+        return 0;
+    
+    #pragma unroll
+    for (int cnt = 0; cnt < UNIX_SEGS_MAX; cnt++) {
+        if (cnt >= segs)
             break;
-        len = BPF_CORE_READ(iov, iov_len);
+        size_t len = BPF_CORE_READ(&iov[cnt], iov_len);
         if (len > 0 && ofs >= 0 && ofs < APP_MSG_LEN_MAX) {
-            bpf_probe_read(data + ofs, APP_MSG_LEN_MAX - ofs, BPF_CORE_READ(iov, iov_base));
+            bpf_probe_read(data + ofs, APP_MSG_LEN_MAX - ofs, BPF_CORE_READ(&iov[cnt], iov_base));
             ofs += len;
-        } else
+        } else {
             break;
-        iov++;
+        }
     }
 
     /* lookup and update socket */
