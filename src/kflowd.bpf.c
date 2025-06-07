@@ -1909,7 +1909,13 @@ static __always_inline int handle_unix_event(void *ctx, const struct SOCK_EVENT_
             break;
         len = BPF_CORE_READ(iov, iov_len);
         if (len > 0 && ofs >= 0 && ofs < APP_MSG_LEN_MAX) {
-            bpf_probe_read(data + ofs, APP_MSG_LEN_MAX - ofs, BPF_CORE_READ(iov, iov_base));
+            char buf[256];
+            size_t copy_len = len;
+            if (copy_len > sizeof(buf))
+                copy_len = sizeof(buf);
+        
+            bpf_probe_read(buf, copy_len, BPF_CORE_READ(iov, iov_base));
+            __builtin_memcpy(data + ofs, buf, copy_len);
             ofs += len;
         } else
             break;
