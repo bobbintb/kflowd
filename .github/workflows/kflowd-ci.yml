@@ -15,7 +15,7 @@ jobs:
     steps:
     - name: 'Create Build Environment'
       run:  |
-        find / name vmlinux
+        find / -name vmlinux
     #     sudo apt update -y
     #     sudo apt install -y libz-dev libelf-dev libcap-dev libbfd-dev libc6-dev-i386 pkg-config
     #     sudo wget https://apt.llvm.org/llvm.sh
