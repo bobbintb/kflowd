@@ -9,7 +9,9 @@ on:
 
 jobs:
   ci:
-    runs-on: ghcr.io/siwatinc/ubuntu-playground
+    runs-on: ubuntu-22.04
+    container:
+      image: ghcr.io/siwatinc/ubuntu-playground
     steps:
     - name: 'Create Build Environment'
       run:  |
