@@ -210,7 +210,7 @@ static __always_inline int handle_fs_event(void *ctx, const struct FS_EVENT_INFO
         __builtin_memset(r->filename, 0, sizeof(r->filename));
         bpf_probe_read_kernel_str(&r->filename, sizeof(r->filename), BPF_CORE_READ(dentry, d_name.name));
         r->isize_first = BPF_CORE_READ(inode, i_size);
-        r->mtime_nsec_first = BPF_CORE_READ(inode, i_mtime.tv_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_mtime.tv_nsec);
+        r->mtime_nsec_first = BPF_CORE_READ(inode, i_mtime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_mtime_nsec);
         r->rc.ts_first = r->rc.ts = bpf_ktime_get_ns();
 
         /* build path by path-walking backwards in kernel dentry tree */
@@ -266,9 +266,9 @@ static __always_inline int handle_fs_event(void *ctx, const struct FS_EVENT_INFO
     r->iuid = BPF_CORE_READ(inode, i_uid.val);
     r->igid = BPF_CORE_READ(inode, i_gid.val);
     r->idev = GETDEV(BPF_CORE_READ(inode, i_sb, s_dev));
-    r->atime_nsec = BPF_CORE_READ(inode, i_atime.tv_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_atime.tv_nsec);
-    r->mtime_nsec = BPF_CORE_READ(inode, i_mtime.tv_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_mtime.tv_nsec);
-    r->ctime_nsec = BPF_CORE_READ(inode, i_ctime.tv_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_ctime.tv_nsec);
+    r->atime_nsec = BPF_CORE_READ(inode, i_atime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_atime_nsec);
+    r->mtime_nsec = BPF_CORE_READ(inode, i_mtime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_mtime_nsec);
+    r->ctime_nsec = BPF_CORE_READ(inode, i_ctime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_ctime_nsec);
     r->events++;
     r->event[index]++;
 
@@ -1893,22 +1893,23 @@ static __always_inline int handle_unix_event(void *ctx, const struct SOCK_EVENT_
 
     /* get app data */
     data = bpf_map_lookup_elem(&heap_appdata, &zero);
-    if (!data) {
+    if (!data)
         bpf_printk("WARNING: Failed to allocate app data for pid %u\n", pid);
         return 0;
-    }
-    iov = (struct iovec *)BPF_CORE_READ(msg, msg_iter.iov);
-    segs = BPF_CORE_READ(msg, msg_iter.nr_segs);
-    for (cnt = 0; cnt < segs; cnt++) {
-        if (cnt >= UNIX_SEGS_MAX)
+    if (!iov || segs <= 0)
+        return 0;
+
+    #pragma unroll
+    for (int cnt = 0; cnt < UNIX_SEGS_MAX; cnt++) {
+        if (cnt >= segs)
             break;
-        len = BPF_CORE_READ(iov, iov_len);
+        size_t len = BPF_CORE_READ(&iov[cnt], iov_len);
         if (len > 0 && ofs >= 0 && ofs < APP_MSG_LEN_MAX) {
-            bpf_probe_read(data + ofs, APP_MSG_LEN_MAX - ofs, BPF_CORE_READ(iov, iov_base));
+            bpf_probe_read(data + ofs, APP_MSG_LEN_MAX - ofs, BPF_CORE_READ(&iov[cnt], iov_base));
             ofs += len;
-        } else
+        } else {
             break;
-        iov++;
+        }
     }
 
     /* lookup and update socket */
