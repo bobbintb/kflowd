@@ -308,7 +308,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
         snprintf(lcomm, sizeof(lcomm), "%s/%s", r->comm, r->proc);
 
     snprintf(ts1, sizeof(ts1), "%.09f", r->age / 1e9);
-    json_obj[J_PROC] = mkjson(MKJ_OBJ, 9,
+    json_obj[J_PROC] = mkjson(MKJ_OBJ, 8, // Changed count from 9 to 8
         J_STRING, JKEY(I_PROC_PARENT), r->comm_parent,
         J_STRING, JKEY(I_PROC), lcomm,
         J_UINT, JKEY(I_PROC_PPID), r->ppid,
@@ -399,7 +399,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
          snprintf(ts_mtime_diff, sizeof(ts_mtime_diff), "%.09f", (rf->mtime_nsec - rf->mtime_nsec_first) / 1e9);
     }
 
-    json_obj[J_FILE] = mkjson(MKJ_OBJ, 17,
+    json_obj[J_FILE] = mkjson(MKJ_OBJ, 18, // Changed count from 17 to 18
         J_STRING, JKEY(I_FILE_PATH), pfilepath,
         J_STRING, JKEY(I_FILE), is_moved_to ? rf->filename_to : rf->filename,
         is_moved_to ?  J_STRING : J_IGN_STRING,
