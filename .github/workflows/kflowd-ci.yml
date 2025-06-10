@@ -14,7 +14,7 @@ jobs:
     - name: 'Create Build Environment'
       run:  |
         sudo apt update -y
-        sudo apt install -y libz-dev libelf-dev libcap-dev libbfd-dev libc6-dev-i386 pkg-config
+        sudo apt install -y libz-dev libelf-dev libcap-dev libbfd-dev libc6-dev-i386 pkg-config libbpf-dev
         sudo wget https://apt.llvm.org/llvm.sh
         sudo chmod u+x llvm.sh
         echo | sudo ./llvm.sh 16
