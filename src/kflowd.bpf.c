@@ -49,6 +49,7 @@ const volatile __u64 ts_start;
 const volatile __u32 agg_events_max;
 const volatile pid_t pid_self;
 const volatile pid_t pid_shell;
+const volatile __u64 target_dev;
 volatile __u32       monitor = MONITOR_NONE;
 
 /* debug helpers for process debugging and kernel stack */
@@ -103,6 +104,22 @@ static __always_inline int handle_fs_event(void *ctx, const struct FS_EVENT_INFO
     bpf_probe_read_kernel_str(filename, sizeof(filename), BPF_CORE_READ(dentry, d_name.name));
     if (!inode || !filename[0])
         return 0;
+
+    // Get the superblock from the inode
+    struct super_block *sb = BPF_CORE_READ(inode, i_sb);
+    if (!sb) {
+        // Optional: could add a counter for debugging if sb is unexpectedly NULL
+        return 0;
+    }
+
+    // Get the device ID from the superblock
+    __u64 event_dev = BPF_CORE_READ(sb, s_dev); // Assuming s_dev is compatible with __u64
+
+    // Filter based on device ID
+    if (event_dev != target_dev) {
+        // Optional: could add a counter for events filtered out
+        return 0;
+    }
 
     ino = BPF_CORE_READ(inode, i_ino);
     imode = BPF_CORE_READ(inode, i_mode);

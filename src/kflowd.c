@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include "kflowd.h"
 #include "kflowd.skel.h"
+#include <bpf/libbpf.h> // Explicitly include libbpf.h
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -426,7 +427,7 @@ int main(int argc, char **argv) {
                 strncpy(dt, DATETIME, DATETIME_LEN_MAX);
                 dt[11] = 0x20;
                 fprintf(stdout, "kflowd " VERSION " (built %s, Linux %s, %s, clang %s, glibc %u.%u, libbpf %s)\n", dt,
-                        KERNEL, ARCH, CLANG_VERSION, __GLIBC__, __GLIBC_MINOR__, LIBBPF_VERSION);
+                        KERNEL, ARCH, CLANG_VERSION, __GLIBC__, __GLIBC_MINOR__, libbpf_version_string());
             }
             return 0;
         case '?':
@@ -473,6 +474,13 @@ int main(int argc, char **argv) {
         skel->rodata->pid_shell = atoi(cmd_output);
         pclose(fp);
     }
+
+    struct stat statbuf;
+    if (stat("/mnt/user/", &statbuf) == -1) {
+        perror("stat(\"/mnt/user/\")");
+        goto cleanup; // Or handle error appropriately
+    }
+    skel->rodata->target_dev = (__u64)statbuf.st_dev;
 
     err = kflowd_bpf__load(skel);
     if (err) {
