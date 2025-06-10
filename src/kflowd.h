@@ -215,6 +215,7 @@ struct FS_EVENT fsevt[] = {{I_CREATE, FS_CREATE, "CREATE", "CRE", "CR"},
 #define DEV_FSTYPE_LEN_MAX        8
 #define TOKEN_LEN_MAX             64
 #define DBG_LEN_MAX               16
+#define UNIX_SOCKET_PATH_MAX      108
 #define KEY_PID_INO(p, i)         ((__u64)p << 32 | i)
 #define GETDEV(dev)               ((__u32)(dev >> 20)) << 8 | ((__u32)(dev & ((1U << 20) - 1)))
 
