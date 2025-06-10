@@ -97,7 +97,7 @@ static struct option longopts[] = {{"legend", no_argument, NULL, 'l'},
 
 /* define globals */
 static struct kflowd_bpf *skel;
-static uint64_t           record_count = 0;
+// static uint64_t           record_count = 0; // Removed
 // static struct utsname     utsn = {0}; // Not strictly needed for core JSON
 // static char               hostip[INET6_ADDRSTRLEN] = {0}; // Not strictly needed for core JSON
 static struct timespec    spec_start;
@@ -219,7 +219,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
     char               *pfilename;
     char               *pfilepath;
     char                mode_str[MODE_LEN_MAX];
-    bool                is_moved_to = false; // Keep for filename logic
+    // bool                is_moved_to = false; // Removed
     long                time_sec_event;
     int                 events_count = 0;
     char                json_msg_final[JSON_OUT_LEN_MAX] = {0};
@@ -231,7 +231,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
     (void)ctx;
     (void)data_sz;
 
-    // record_count++; // Not part of JSON, can be removed if not used elsewhere
+    // record_count++; // Removed
 
     time_sec_event = r->ts / (uint64_t)1e9; // Corrected: r->ts instead of r->rc.ts
     tm = gmtime(&time_sec_event);
@@ -269,13 +269,13 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
 
     // TABLE_OUTPUT block removed
 
-    for (cntf = 0; cntf < FS_EVENT_MAX; ++cntf)
-        if (rf->event[cntf] && I_MOVED_TO == cntf) {
-            is_moved_to = true; // This variable is used below
-            snprintf(filename_buf, sizeof(filename_buf), "%s>%s", rf->filename_from, rf->filename_to);
-            pfilename = filename_buf;
-            break;
-        }
+    // Updated logic for pfilename based on I_MOVED_TO event
+    if (rf->event[I_MOVED_TO] && rf->filename_to[0]) {
+        snprintf(filename_buf, sizeof(filename_buf), "%s>%s", rf->filename_from, rf->filename_to);
+        pfilename = filename_buf;
+    } else {
+        pfilename = (char*)rf->filename; // Default to filename if not a MOVED_TO or filename_to is empty
+    }
 
     snprintf(mode_str, sizeof(mode_str), "%s", S_ISLNK(rf->imode) ? "symlink" : (rf->inlink > 1 ? "hardlink" : "regular"));
 
