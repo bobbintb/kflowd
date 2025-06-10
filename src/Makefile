@@ -10,8 +10,8 @@
 OUTPUT := .output
 CLANG ?= clang
 LLVM_STRIP ?= llvm-strip
-LIBBPF_SRC := $(abspath ../libbpf/src)
-LIBBPF_OBJ := $(abspath $(OUTPUT)/libbpf.a)
+# LIBBPF_SRC := $(abspath ../libbpf/src) # Removed
+# LIBBPF_OBJ := $(abspath $(OUTPUT)/libbpf.a) # Removed
 BINDIR := ../bin/
 ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 KERNEL := $(shell uname -r)
@@ -23,13 +23,13 @@ VMLINUX := ../vmlinux/$(ARCH)/vmlinux.h
 GIT_VERSION := $(shell git describe --abbrev=4 --dirty --always --tags | cut -d '-' -f 1,2,4 | sed 's/-/./1')
 GLIBC_VERSION := ${shell ldd --version | head -n 1 | cut -d ')' -f2}
 CLANG_VERSION := ${shell clang --version | head -n 1 | sed 's/[^0-9.]*\([0-9.]*\).*/\1/'}
-LIBBPF_VERSION := ${shell git submodule status ../libbpf | cut -d ' ' -f 4 | sed 's/[v()]//g'}
+# LIBBPF_VERSION := ${shell git submodule status ../libbpf | cut -d ' ' -f 4 | sed 's/[v()]//g'} # Removed
 DATETIME := $(shell date +'%b-%d-%Y_%H:%M:%S%z')
-INCLUDES := -I$(OUTPUT) -I../libbpf/include/uapi -I$(dir $(VMLINUX))
+INCLUDES := -I$(OUTPUT) -I$(dir $(VMLINUX)) # Removed -I../libbpf/include/uapi
 CFLAGS := -Wextra -g -std=gnu99 -Wall -DDATETIME=\"$(DATETIME)\" -DVERSION=\"$(GIT_VERSION)\" -DKERNEL=\"$(KERNEL)\"\
-          -D ARCH=\"$(ARCH)\" -DCLANG_VERSION=\"$(CLANG_VERSION)\" -DLIBBPF_VERSION=\"$(LIBBPF_VERSION)\"
+          -D ARCH=\"$(ARCH)\" -DCLANG_VERSION=\"$(CLANG_VERSION)\" # Removed -DLIBBPF_VERSION
 CLANG_CHECKS := --checks=-*,clang-analyzer-*,-clang-analyzer-cplusplus* --warnings-as-errors=*
-LDFLAGS := -ldl
+LDFLAGS := -ldl -lbpf # Added -lbpf
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 
 APPS = kflowd
@@ -138,19 +138,19 @@ rpm deb: $(APPS)
 	$(Q)nfpm package --packager $@
 	$(Q)rm *.yaml *.sh
 
-$(OUTPUT) $(OUTPUT)/libbpf:
+$(OUTPUT):
 	$(call msg,MKDIR,$@)
 	$(Q)mkdir -p $@
 
-# Build libbpf
-$(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPUT)/libbpf
-	$(Q)$(MAKE) CROSS_COMPILE=$(CROSS_COMPILE)g -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1\
-		OBJDIR=$(dir $@)libbpf DESTDIR=$(dir $@)\
-		INCLUDEDIR= LIBDIR= UAPIDIR=\
-		install
+# Build libbpf # Removed section
+# $(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPUT)/libbpf
+#	$(Q)$(MAKE) CROSS_COMPILE=$(CROSS_COMPILE)g -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1\
+#		OBJDIR=$(dir $@)libbpf DESTDIR=$(dir $@)\
+#		INCLUDEDIR= LIBDIR= UAPIDIR=\
+#		install
 
 # Build BPF code
-$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) *.h $(VMLINUX) | $(OUTPUT)
+$(OUTPUT)/%.bpf.o: %.bpf.c *.h $(VMLINUX) | $(OUTPUT) # Removed $(LIBBPF_OBJ) dependency
 	$(call msg,BPF,$@)
 	$(Q)$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES) -c $(filter %.c,$^) -o $@
 	$(Q)$(LLVM_STRIP) -g $@ # strip useless DWARF info
@@ -168,10 +168,10 @@ $(OUTPUT)/%.o: %.c *.h | $(OUTPUT)
 	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -c $(filter %.c,$^) -o $@
 
 # Build application binary
-$(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
+$(APPS): %: $(OUTPUT)/%.o | $(OUTPUT) # Removed $(LIBBPF_OBJ) dependency
 	$(Q)mkdir -p $(BINDIR)
-	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $(BINDIR)$@
-	$(call msg,VERSION,$(GIT_VERSION) ($(ARCH), clang $(CLANG_VERSION), glibc $(GLIBC_VERSION), libbpf $(LIBBPF_VERSION)))
+	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $(BINDIR)$@ # -lbpf already added to LDFLAGS
+	$(call msg,VERSION,$(GIT_VERSION) ($(ARCH), clang $(CLANG_VERSION), glibc $(GLIBC_VERSION))) # Removed libbpf version
 	$(call msg,BINARY,$(BINDIR)$@)
 
 # delete failed targets
