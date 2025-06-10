@@ -144,13 +144,13 @@ struct FS_EVENT {
 /* define filesystem event index */
 enum INDEX_FS_EVENT {
     I_CREATE,
-    I_OPEN,
-    I_OPEN_EXEC,
-    I_ACCESS,
-    I_ATTRIB,
+    I_OPEN,          // Restored for compilation, filter in BPF handles it
+    I_OPEN_EXEC,     // Restored for compilation
+    I_ACCESS,        // Restored for compilation
+    I_ATTRIB,        // Restored for compilation
     I_MODIFY,
-    I_CLOSE_WRITE,
-    I_CLOSE_NOWRITE,
+    I_CLOSE_WRITE,   // Restored for compilation
+    I_CLOSE_NOWRITE, // Restored for compilation
     I_MOVED_FROM,
     I_MOVED_TO,
     I_DELETE,
@@ -162,13 +162,13 @@ enum INDEX_FS_EVENT {
 
 /* global instance shared betwwwn user and kernel-side code */
 struct FS_EVENT fsevt[] = {{I_CREATE, FS_CREATE, "CREATE", "CRE", "CR"},
-                           {I_OPEN, FS_OPEN, "OPEN", "OPN", "OP"},
-                           {I_OPEN_EXEC, FS_OPEN_EXEC, "OPEN_EXEC", "OPX", "OX"},
-                           {I_ACCESS, FS_ACCESS, "ACCESS", "ACC", "AC"},
-                           {I_ATTRIB, FS_ATTRIB, "ATTRIB", "ATT", "AT"},
+                           {I_OPEN, FS_OPEN, "OPEN", "OPN", "OP"}, // Restored
+                           {I_OPEN_EXEC, FS_OPEN_EXEC, "OPEN_EXEC", "OPX", "OX"}, // Restored
+                           {I_ACCESS, FS_ACCESS, "ACCESS", "ACC", "AC"}, // Restored
+                           {I_ATTRIB, FS_ATTRIB, "ATTRIB", "ATT", "AT"}, // Restored
                            {I_MODIFY, FS_MODIFY, "MODIFY", "MOD", "MO"},
-                           {I_CLOSE_WRITE, FS_CLOSE_WRITE, "CLOSE_WRITE", "CLW", "CW"},
-                           {I_CLOSE_NOWRITE, FS_CLOSE_NOWRITE, "CLOSE_NOWRITE", "CLN", "CN"},
+                           {I_CLOSE_WRITE, FS_CLOSE_WRITE, "CLOSE_WRITE", "CLW", "CW"}, // Restored
+                           {I_CLOSE_NOWRITE, FS_CLOSE_NOWRITE, "CLOSE_NOWRITE", "CLN", "CN"}, // Restored
                            {I_MOVED_FROM, FS_MOVED_FROM, "MOVED_FROM", "MVF", "MF"},
                            {I_MOVED_TO, FS_MOVED_TO, "MOVED_TO", "MVT", "MT"},
                            {I_DELETE, FS_DELETE, "DELETE", "DEL", "DE"},
@@ -234,16 +234,6 @@ struct FS_EVENT_INFO {
 /* define common record sent to ringbuffer for user */
 struct RECORD {
     uint32_t type;
-    // uint32_t pid; // Removed
-    // uint32_t tid; // Removed
-    // uint32_t ppid; // Removed
-    // uint32_t uid; // Removed
-    // uint32_t gid; // Removed
-    // uint64_t age; // Removed
-    // char     proc[TASK_COMM_SHORT_LEN]; // Removed
-    // char     comm_parent[TASK_COMM_LEN]; // Removed
-    // char     comm[TASK_COMM_LEN]; // Removed
-    // uint64_t ts_first; // Removed
     uint64_t ts;
 };
 
@@ -255,14 +245,10 @@ struct RECORD_FS {
     uint32_t      ino;
     uint32_t      imode;
     uint32_t      inlink;
-    // uint32_t      iuid; // Removed
-    // uint32_t      igid; // Removed
-    // uint32_t      idev; // Removed
     uint64_t      isize;
     uint64_t      atime_nsec;
     uint64_t      mtime_nsec;
     uint64_t      ctime_nsec;
-    // uint64_t      mtime_nsec_first; // Removed
     uint64_t      isize_first;
     char          filepath[FILEPATH_LEN_MAX];
     union {
@@ -310,45 +296,20 @@ struct JSON_SUB_KEY {
 
 /* define json key index */
 enum INDEX_JSON_KEY {
-    // I_INFO_SEQUENCE_NUMBER, // Removed
     I_INFO_TIMESTAMP,
-    // I_INFO_MONITOR, // Removed
-    // I_INFO_HOST_NAME, // Removed
-    // I_INFO_HOST_IP, // Removed
-    // I_INFO_HOST_TOKEN, // Removed
-    // I_INFO_SYSTEM, // Removed
-    // I_INFO_KERNEL, // Removed
-    // I_INFO_VERSION, // Removed
-    // I_INFO_UPTIME, // Removed
-    // I_PROC_PARENT, // Removed
-    // I_PROC, // Removed
-    // I_PROC_PPID, // Removed
-    // I_PROC_PID, // Removed
-    // I_PROC_TID, // Removed
-    // I_PROC_UID, // Removed
-    // I_PROC_GID, // Removed
-    // I_PROC_AGE, // Removed
     I_FILE_PATH,
     I_FILE,
-    // I_FILE_ORIGIN, // Removed
     I_FILE_MODE,
     I_FILE_EVENT_COUNT,
     I_FILE_EVENTS,
-    // I_FILE_EVENTS_DURATION, // Removed - relies on ts_first
     I_FILE_INODE,
     I_FILE_INODE_LINK_COUNT,
-    // I_FILE_PERMISSIONS, // Removed
-    // I_FILE_UID, // Removed - file attributes uid
-    // I_FILE_GID, // Removed - file attributes gid
     I_FILE_SIZE,
     I_FILE_SIZE_CHANGE,
     I_FILE_ACCESS_TIME,
     I_FILE_STATUS_CHANGE_TIME,
     I_FILE_MODIFICATION_TIME,
-    // I_FILE_MODIFICATION_TIME_CHANGE, // Removed - relies on mtime_nsec_first
-    // I_TS_FIRST, // Removed
-    // I_TS, // Removed - this was for common record, individual event times are kept
-    I_MAX // Keep I_MAX for array sizing if still used, or remove if keys are fixed now
+    I_MAX
 };
 
 /* JSON macro to get key */
@@ -388,8 +349,7 @@ enum MKJSON_VALUE_TYPE {
 
 /* define json output messages  */
 enum JSON_OBJ {
-    J_INFO, // This will be simplified in kflowd.c if many Info* keys are gone
-    // J_PROC, // Proc related info is removed from general event
+    J_INFO,
     J_FILE,
     JSON_OBJ_MAX
 };
