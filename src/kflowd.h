@@ -17,7 +17,7 @@
 /* define kernel subsystems and switch */
 #define MONITOR_NONE 1
 #define MONITOR_FILE 2
-#define MONITOR_SOCK 4
+// MONITOR_SOCK 4 // Removed
 #define KPROBE_SWITCH(monitor_type)                                                                                    \
     if (!(monitor & monitor_type))                                                                                     \
         return 0;
@@ -144,13 +144,13 @@ struct FS_EVENT {
 /* define filesystem event index */
 enum INDEX_FS_EVENT {
     I_CREATE,
-    I_OPEN,
-    I_OPEN_EXEC,
-    I_ACCESS,
-    I_ATTRIB,
+    I_OPEN,          // Restored for compilation, filter in BPF handles it
+    I_OPEN_EXEC,     // Restored for compilation
+    I_ACCESS,        // Restored for compilation
+    I_ATTRIB,        // Restored for compilation
     I_MODIFY,
-    I_CLOSE_WRITE,
-    I_CLOSE_NOWRITE,
+    I_CLOSE_WRITE,   // Restored for compilation
+    I_CLOSE_NOWRITE, // Restored for compilation
     I_MOVED_FROM,
     I_MOVED_TO,
     I_DELETE,
@@ -162,13 +162,13 @@ enum INDEX_FS_EVENT {
 
 /* global instance shared betwwwn user and kernel-side code */
 struct FS_EVENT fsevt[] = {{I_CREATE, FS_CREATE, "CREATE", "CRE", "CR"},
-                           {I_OPEN, FS_OPEN, "OPEN", "OPN", "OP"},
-                           {I_OPEN_EXEC, FS_OPEN_EXEC, "OPEN_EXEC", "OPX", "OX"},
-                           {I_ACCESS, FS_ACCESS, "ACCESS", "ACC", "AC"},
-                           {I_ATTRIB, FS_ATTRIB, "ATTRIB", "ATT", "AT"},
+                           {I_OPEN, FS_OPEN, "OPEN", "OPN", "OP"}, // Restored
+                           {I_OPEN_EXEC, FS_OPEN_EXEC, "OPEN_EXEC", "OPX", "OX"}, // Restored
+                           {I_ACCESS, FS_ACCESS, "ACCESS", "ACC", "AC"}, // Restored
+                           {I_ATTRIB, FS_ATTRIB, "ATTRIB", "ATT", "AT"}, // Restored
                            {I_MODIFY, FS_MODIFY, "MODIFY", "MOD", "MO"},
-                           {I_CLOSE_WRITE, FS_CLOSE_WRITE, "CLOSE_WRITE", "CLW", "CW"},
-                           {I_CLOSE_NOWRITE, FS_CLOSE_NOWRITE, "CLOSE_NOWRITE", "CLN", "CN"},
+                           {I_CLOSE_WRITE, FS_CLOSE_WRITE, "CLOSE_WRITE", "CLW", "CW"}, // Restored
+                           {I_CLOSE_NOWRITE, FS_CLOSE_NOWRITE, "CLOSE_NOWRITE", "CLN", "CN"}, // Restored
                            {I_MOVED_FROM, FS_MOVED_FROM, "MOVED_FROM", "MVF", "MF"},
                            {I_MOVED_TO, FS_MOVED_TO, "MOVED_TO", "MVT", "MT"},
                            {I_DELETE, FS_DELETE, "DELETE", "DEL", "DE"},
@@ -176,14 +176,6 @@ struct FS_EVENT fsevt[] = {{I_CREATE, FS_CREATE, "CREATE", "CRE", "CR"},
                            {I_MOVE_SELF, FS_MOVE_SELF, "MOVE_SELF", "MSF", "MS"},
                            {I_UNMOUNT, FS_UNMOUNT, "UNMOUNT", "UNM", "UM"},
                            {I_Q_OVERFLOW, FS_Q_OVERFLOW, "Q_OVERFLOW", "QOF", "QO"}};
-
-/* define socket events */
-struct SOCK_EVENT {
-    short index;
-    short value;
-    char  name[16];
-    char  shortname[4];
-};
 
 /* define various non-kernel macros */
 #define TOLOWER_STR(str)                                                                                               \
@@ -199,12 +191,8 @@ struct SOCK_EVENT {
 #define SYS_FILE_VMLINUX          "/sys/kernel/btf/vmlinux"
 #define CACHE_ENTRIES_MAX         65536
 #define MAP_RECORDS_MAX           65536
-#define MAP_XFILES_MAX            65536
 #define MAP_PIDS_MAX              8192
-#define MAP_SOCKS_MAX             262144
-#define RECORD_SOCK_MAX           5
 #define RECORD_TYPE_FILE          1
-#define RECORD_TYPE_SOCK          2
 #define TASK_COMM_LEN             32
 #define TASK_COMM_SHORT_LEN       16
 #define DNAME_INLINE_LEN          32
@@ -221,382 +209,19 @@ struct SOCK_EVENT {
 #define CMD_OUTPUT_LEN_MAX        1024
 #define JSON_OUT_LEN_MAX          8192
 #define FS_EVENT_MAX              (int)(sizeof(fsevt) / sizeof(struct FS_EVENT))
-#define SOCK_FLAGS_MAX            64
-#define SOCK_EXP_MAX              4
 #define MODE_LEN_MAX              12
 #define DATETIME_LEN_MAX          64
 #define DEV_NAME_LEN_MAX          32
 #define DEV_FSTYPE_LEN_MAX        8
-#define CHECKSUM_TYPE_MD5         0
-#define CHECKSUM_TYPE_SHA256      1
-#define CACHE_TYPE_USER           0
-#define CACHE_TYPE_GROUP          1
-#define MD5_DIGEST_STR_LEN        32
-#define MD5_DIGEST_LEN            16
-#define SHA256_DIGEST_STR_LEN     64
-#define SHA256_DIGEST_LEN         32
 #define TOKEN_LEN_MAX             64
 #define DBG_LEN_MAX               16
 #define KEY_PID_INO(p, i)         ((__u64)p << 32 | i)
-#define KEY_SOCK(h)               ((__u64)h)
 #define GETDEV(dev)               ((__u32)(dev >> 20)) << 8 | ((__u32)(dev & ((1U << 20) - 1)))
-#define UDP_MONITOR_STR_LEN       28
-#define UDP_MONITOR_OFS           104
-#define UDP_SERVER_MAX            8
-#define UDP_HOST_DEFAULT          "::FFFF:127.0.0.1"
-#define UDP_PORT_DEFAULT          2056
-#define TCP_FLAGS_LEN_MAX         256
-#define TCP_FLAGS_MAX             (int)(sizeof(tcp_flags) / sizeof(struct TCP_FLAG))
-#define HTTP_HEADERS_MAX          32
-#define HTTP_HEADER_LEN_MAX       256
-#define HTTP_HEADER_SHORT_LEN_MAX 16
-#define HTTP_MSG_LEN_MIN          16
-#define HTTP_BODY_LEN_MAX         128
-#define HTTP_PORT                 80
-#define DNS_MSG_LEN_MIN           16
-#define DNS_PORT                  53
-#define DNS_QNAME_LEN_MAX         128
-#define DNS_FLAGS_LEN_MAX         32
-#define DNS_RDATA_MAX             8
-#define DNS_RDATA_DEC_LEN_MAX     512
-#define DNS_QTYPE_MAX             (int)(sizeof(dns_qtypes) / sizeof(struct DNS_QTYPE))
-#define SYSLOG_PORT               514
-#define SYSLOG_KEY_LEN_MAX        256
-#define SYSLOG_VALUE_LEN_MAX      256
-#define UNIX_SEGS_MAX             32
-
-/* define application constants */
-enum APP_TYPE { APP_DNS, APP_HTTP, APP_SYSLOG, APP_MAX };
-#define GET_APP_NAME(type)                                                                                             \
-    (type == APP_DNS ? "DNS" : type == APP_HTTP ? "HTTP" : type == APP_SYSLOG ? "SYSLOG" : "unknown")
-#define APP_SYSLOG_UNIX 512
-#define APP_MSG_MAX     4
-#define APP_MSG_LEN_MIN MIN(DNS_MSG_LEN_MIN, HTTP_MSG_LEN_MIN)
-#define APP_MSG_LEN_MAX 1400
-#define APP_PORT_MAX    8
 
 /* define macros for startup requirement checks */
 #define CHECK_MAX         3
 #define CHECK_MSG_LEN_MAX 64
 enum check { c_fail, c_ok, c_warn };
-
-/* define network constants */
-#define ETH_HLEN        14
-#define ETH_P_IP        0x0800
-#define ETH_P_IPV6      0x86DD
-#define AF_UNIX         1
-#define AF_INET         2
-#define AF_INET6        10
-#define IP_ADDR_LEN_MAX 16
-#define UNIX_PATH_MAX   108
-
-/* define ip fragmentation flags */
-#define IP_RF      0x8000
-#define IP_DF      0x4000
-#define IP_MF      0x2000
-#define IP_OFFMASK 0x1fff
-
-/* define ipv6 next headers */
-#define IPV6_NH_HOP      0
-#define IPV6_NH_TCP      6
-#define IPV6_NH_UDP      17
-#define IPV6_NH_IPV6     41
-#define IPV6_NH_ROUTING  43
-#define IPV6_NH_FRAGMENT 44
-#define IPV6_NH_GRE      47
-#define IPV6_NH_ESP      50
-#define IPV6_NH_AUTH     51
-#define IPV6_NH_ICMP     58
-#define IPV6_NH_NONE     59
-#define IPV6_NH_DEST     60
-#define IPV6_NH_SCTP     132
-#define IPV6_NH_MOBILITY 135
-
-/* define udp states */
-#define UDP_NONE        0
-#define UDP_ESTABLISHED 1
-#define UDP_CLOSE       2
-
-/* define socket idle and active timeouts */
-#define SOCK_IDLE_TIMEOUT   15
-#define SOCK_ACTIVE_TIMEOUT 1800
-
-/* define socket bind locks */
-#define SOCK_BINDADDR_LOCK 4
-#define SOCK_BINDPORT_LOCK 8
-
-/* define socket buffer constants */
-#define SKB_DST_NOREF   1UL
-#define SKB_DST_PTRMASK ~(SKB_DST_NOREF)
-
-/* define tcp and udp roles */
-enum ROLE {
-    ROLE_NONE,
-    ROLE_TCP_CLIENT,
-    ROLE_TCP_SERVER,
-    ROLE_UDP_CLIENT,
-    ROLE_UDP_SERVER,
-    ROLE_UNIX_CLIENT,
-    ROLE_UNIX_SERVER
-};
-#define GET_ROLE_STR(role)                                                                                             \
-    (role == ROLE_TCP_CLIENT    ? "tcp client"                                                                         \
-     : role == ROLE_TCP_SERVER  ? "tcp server"                                                                         \
-     : role == ROLE_UDP_CLIENT  ? "udp client"                                                                         \
-     : role == ROLE_UDP_SERVER  ? "udp server"                                                                         \
-     : role == ROLE_UNIX_CLIENT ? "unix client"                                                                        \
-     : role == ROLE_UNIX_SERVER ? "unix server"                                                                        \
-                                : "unknown")
-
-/* define tcp flags */
-#define TCP_NONE 0
-#define TCP_FIN  1
-#define TCP_SYN  2
-#define TCP_RST  4
-#define TCP_PSH  8
-#define TCP_ACK  16
-#define TCP_URG  32
-struct TCP_FLAG {
-    short id;
-    char  flag[4];
-} tcp_flags[] = {{TCP_FIN, "FIN"}, {TCP_SYN, "SYN"}, {TCP_RST, "RST"},
-                 {TCP_PSH, "PSH"}, {TCP_ACK, "ACK"}, {TCP_URG, "URG"}};
-
-/* define tcp states */
-#define TCP_STATE_LEN_MAX 32
-char tcp_state_table[][TCP_STATE_LEN_MAX] = {"TCP_NONE",         "TCP_ESTABLISHED", "TCP_SYN_SENT",  "TCP_SYN_RECV",
-                                             "TCP_FIN_WAIT1",    "TCP_FIN_WAIT2",   "TCP_TIME_WAIT", "TCP_CLOSE",
-                                             "TCP_CLOSE_WAIT",   "TCP_LAST_ACK",    "TCP_LISTEN",    "TCP_CLOSING",
-                                             "TCP_NEW_SYN_RECV", "TCP_MAX_STATES"};
-/* define dns port and record types */
-#define DNS_QTYPE_DEC_LEN_MAX 8
-#define DNS_QTYPE_A           1
-#define DNS_QTYPE_NS          2
-#define DNS_QTYPE_CNAME       5
-#define DNS_QTYPE_SOA         6
-#define DNS_QTYPE_PTR         12
-#define DNS_QTYPE_MX          15
-#define DNS_QTYPE_TXT         16
-#define DNS_QTYPE_AAAA        28
-struct DNS_QTYPE {
-    short id;
-    char  type[DNS_QTYPE_DEC_LEN_MAX];
-} dns_qtypes[] = {{DNS_QTYPE_A, "A"},     {DNS_QTYPE_NS, "NS"}, {DNS_QTYPE_CNAME, "CNAME"}, {DNS_QTYPE_SOA, "SOA"},
-                  {DNS_QTYPE_PTR, "PTR"}, {DNS_QTYPE_MX, "MX"}, {DNS_QTYPE_TXT, "TXT"},     {DNS_QTYPE_AAAA, "AAAA"}};
-
-/* define dns class codes */
-#define DNS_QCLASS_LEN_MAX 12
-#define DNS_QCLASS_MAX     5
-#define DNS_QCLASS_NONE    0
-#define DNS_QCLASS_IN      1
-#define DNS_QCLASS_CS      2
-#define DNS_QCLASS_CH      3
-#define DNS_QCLASS_HS      4
-char dns_qclass_table[][DNS_QCLASS_LEN_MAX] = {"NONE", "IN", "CS", "CH", "HS"};
-
-/* define dns op codes */
-#define DNS_OPCODE_LEN_MAX 16
-#define DNS_OPCODE_MAX     3
-#define DNS_OPCODE_QUERY   0
-#define DNS_OPCODE_IQUERY  1
-#define DNS_OPCODE_STATUS  2
-char dns_opcode_table[][DNS_OPCODE_LEN_MAX] = {"QUERY", "IQUERY", "STATUS"};
-
-/* define dns op codes */
-#define DNS_RCODE_LEN_MAX   16
-#define DNS_RCODE_MAX       4
-#define DNS_RCODE_NOERROR   0
-#define DNS_RCODE_FORMERROR 1
-#define DNS_RCODE_SERVFAIL  2
-#define DNS_RCODE_NXDOMAIN  3
-char dns_rcode_table[][DNS_RCODE_LEN_MAX] = {"NOERROR", "FORMERROR", "SERVFAIL", "NXDOMAIN"};
-
-/* define dns flags */
-struct DNS_FLAGS {
-    uint8_t rd : 1;
-    uint8_t tc : 1;
-    uint8_t aa : 1;
-    uint8_t opcode : 4;
-    uint8_t qr : 1;
-    uint8_t rcode : 4;
-    uint8_t cd : 1;
-    uint8_t ad : 1;
-    uint8_t z : 1;
-    uint8_t ra : 1;
-};
-
-/* define decoded dns message */
-struct APP_MSG_DNS {
-    uint16_t         transaction_id;
-    struct DNS_FLAGS flags;
-    uint16_t         qtype;
-    uint16_t         qclass;
-    char             qname[DNS_QNAME_LEN_MAX];
-    uint16_t         qdcount;
-    uint16_t         ancount;
-    struct {
-        uint32_t ttl;
-        uint16_t rqtype;
-        uint16_t rqclass;
-        uint16_t rdlen;
-        char     rdata_dec[DNS_RDATA_DEC_LEN_MAX];
-        char     rdata_an_dec[DNS_RDATA_DEC_LEN_MAX];
-    } an[DNS_RDATA_MAX];
-};
-
-/* define decoded http message */
-struct APP_MSG_HTTP {
-    char     method[HTTP_HEADER_SHORT_LEN_MAX];
-    char     url[HTTP_HEADER_LEN_MAX];
-    char     version[HTTP_HEADER_SHORT_LEN_MAX];
-    uint32_t status;
-    char     reason[HTTP_HEADER_LEN_MAX];
-    char     header_name[HTTP_HEADERS_MAX][HTTP_HEADER_LEN_MAX];
-    char     header_value[HTTP_HEADERS_MAX][HTTP_HEADER_LEN_MAX];
-    char     body[HTTP_BODY_LEN_MAX];
-};
-
-/* dfine syslog constants */
-#define SYSLOG_FACILITY_LEN_MAX     32
-#define SYSLOG_SEVERITY_LEN_MAX     32
-#define SYSLOG_HEADER_SHORT_LEN_MAX 48
-#define SYSLOG_HEADER_LEN_MAX       255
-#define SYSLOG_DEVLOG_SOCKET        "/run/systemd/journal/dev-log"
-#define SYSLOG_JOURNAL_SOCKET       "/run/systemd/journal/socket"
-char syslog_facility_table[][SYSLOG_FACILITY_LEN_MAX] = {"Kernel",
-                                                         "User",
-                                                         "Mail System",
-                                                         "System Daemon",
-                                                         "Security/Authorization",
-                                                         "Internal",
-                                                         "Line Printer",
-                                                         "Network News",
-                                                         "UUCP",
-                                                         "Clock Daemon",
-                                                         "Security/Authorization",
-                                                         "FTP Daemon",
-                                                         "NTP",
-                                                         "Log Audit",
-                                                         "Log Alert",
-                                                         "Clock Daemon",
-                                                         "Local0",
-                                                         "Local1",
-                                                         "Local2",
-                                                         "Local3",
-                                                         "Local4",
-                                                         "Local5",
-                                                         "Local6",
-                                                         "Local7"};
-char syslog_severity_table[][SYSLOG_SEVERITY_LEN_MAX] = {"Emergency (0)",     "Alert (1)",   "Critical (2)",
-                                                         "Error (3)",         "Warning (4)", "Notice (5)",
-                                                         "Informational (6)", "Debug (7)"};
-
-/* define decoded http message */
-struct APP_MSG_SYSLOG {
-    uint32_t priority;
-    uint32_t version;
-    char     timestamp[SYSLOG_HEADER_SHORT_LEN_MAX];
-    char     hostname[SYSLOG_HEADER_LEN_MAX];
-    char     appname[SYSLOG_HEADER_SHORT_LEN_MAX];
-    char     procid[SYSLOG_HEADER_SHORT_LEN_MAX];
-    char     msgid[SYSLOG_HEADER_SHORT_LEN_MAX];
-    char     data[SYSLOG_HEADER_LEN_MAX];
-    char     message[SYSLOG_HEADER_LEN_MAX];
-};
-
-/* define app message */
-struct APP_MSG {
-    uint8_t  type;
-    uint8_t  cnt;
-    uint64_t ts[APP_MSG_MAX];
-    uint32_t seq[APP_MSG_MAX];
-    uint16_t len[APP_MSG_MAX];
-    uint8_t  isrx[APP_MSG_MAX];
-    char     data[APP_MSG_MAX][APP_MSG_LEN_MAX];
-};
-
-/* define socket info */
-struct SOCK_INFO {
-    uint32_t       pid;
-    uint32_t       tid;
-    uint32_t       ppid;
-    uint32_t       uid;
-    uint32_t       gid;
-    uint64_t       ts_proc;
-    char           proc[TASK_COMM_SHORT_LEN];
-    char           comm[TASK_COMM_LEN];
-    char           comm_parent[TASK_COMM_LEN];
-    struct sock   *sock;
-    uint16_t       tx_ifindex;
-    uint64_t       tx_ts_first;
-    uint64_t       tx_ts;
-    uint32_t       tx_events;
-    uint32_t       tx_event[SOCK_FLAGS_MAX];
-    uint8_t        tx_flags_map[SOCK_FLAGS_MAX];
-    uint8_t        tx_flags_map_cnt;
-    uint16_t       rx_ifindex;
-    uint64_t       rx_ts_first;
-    uint64_t       rx_ts;
-    uint32_t       rx_events;
-    uint32_t       rx_event[SOCK_FLAGS_MAX];
-    uint8_t        rx_flags_map[SOCK_FLAGS_MAX];
-    uint8_t        rx_flags_map_cnt;
-    uint32_t       rx_ttl;
-    uint16_t       family;
-    uint8_t        proto;
-    uint8_t        state;
-    uint8_t        role;
-    char           laddr[IP_ADDR_LEN_MAX];
-    char           raddr[IP_ADDR_LEN_MAX];
-    char           addr[UNIX_PATH_MAX];
-    uint16_t       lport;
-    uint16_t       rport;
-    uint64_t       ts_first;
-    uint32_t       tx_data_packets;
-    uint32_t       tx_packets;
-    uint32_t       tx_packets_retrans[2];
-    uint32_t       tx_packets_dups[2];
-    uint64_t       tx_bytes;
-    uint64_t       tx_bytes_acked[2];
-    uint64_t       tx_bytes_retrans[2];
-    uint32_t       tx_rto;
-    uint32_t       rx_data_packets;
-    uint32_t       rx_packets;
-    uint32_t       rx_packets_queued;
-    uint32_t       rx_packets_drop[2];
-    uint32_t       rx_packets_reorder[2];
-    uint32_t       rx_packets_frag;
-    uint64_t       rx_bytes;
-    uint32_t       rtt;
-    struct APP_MSG app_msg;
-};
-
-struct SOCK_TUPLE {
-    char     laddr[IP_ADDR_LEN_MAX];
-    char     raddr[IP_ADDR_LEN_MAX];
-    uint16_t lport;
-    uint16_t rport;
-    uint8_t  proto;
-};
-
-/* define socket queue */
-struct SOCK_QUEUE {
-    uint64_t key;
-    uint64_t ts;
-};
-
-/* define socket event info */
-struct SOCK_EVENT_INFO {
-    struct sock    *sock;
-    struct sk_buff *skb; /* tcp, udp sockets */
-    struct msghdr  *msg; /* unix socket */
-    uint16_t        family;
-    uint16_t        lport;
-    uint16_t        rport;
-    void           *args;
-    char            isrx;
-    char           *func;
-};
 
 /* define filesystem event info for ringbuffer event handler */
 struct FS_EVENT_INFO {
@@ -609,16 +234,6 @@ struct FS_EVENT_INFO {
 /* define common record sent to ringbuffer for user */
 struct RECORD {
     uint32_t type;
-    uint32_t pid;
-    uint32_t tid;
-    uint32_t ppid;
-    uint32_t uid;
-    uint32_t gid;
-    uint64_t age;
-    char     proc[TASK_COMM_SHORT_LEN];
-    char     comm_parent[TASK_COMM_LEN];
-    char     comm[TASK_COMM_LEN];
-    uint64_t ts_first;
     uint64_t ts;
 };
 
@@ -630,14 +245,10 @@ struct RECORD_FS {
     uint32_t      ino;
     uint32_t      imode;
     uint32_t      inlink;
-    uint32_t      iuid;
-    uint32_t      igid;
-    uint32_t      idev;
     uint64_t      isize;
     uint64_t      atime_nsec;
     uint64_t      mtime_nsec;
     uint64_t      ctime_nsec;
-    uint64_t      mtime_nsec_first;
     uint64_t      isize_first;
     char          filepath[FILEPATH_LEN_MAX];
     union {
@@ -649,50 +260,6 @@ struct RECORD_FS {
     };
 };
 
-/* define aggregated socket record sent to ringbuffer for user */
-struct RECORD_SOCK {
-    struct RECORD  rc;
-    uint8_t        tx_flags[SOCK_FLAGS_MAX];
-    uint32_t       tx_events;
-    uint32_t       tx_event[SOCK_FLAGS_MAX];
-    uint64_t       tx_ts_first;
-    uint64_t       tx_ts;
-    uint8_t        rx_flags[SOCK_FLAGS_MAX];
-    uint32_t       rx_event[SOCK_FLAGS_MAX];
-    uint32_t       rx_events;
-    uint64_t       rx_ts_first;
-    uint64_t       rx_ts;
-    uint16_t       family;
-    uint8_t        proto;
-    uint8_t        state;
-    uint8_t        role;
-    char           laddr[IP_ADDR_LEN_MAX];
-    char           raddr[IP_ADDR_LEN_MAX];
-    char           addr[UNIX_PATH_MAX];
-    uint16_t       lport;
-    uint16_t       rport;
-    uint16_t       tx_ifindex;
-    uint32_t       tx_data_packets;
-    uint32_t       tx_packets;
-    uint32_t       tx_packets_retrans;
-    uint32_t       tx_packets_dups;
-    uint64_t       tx_bytes;
-    uint64_t       tx_bytes_acked;
-    uint64_t       tx_bytes_retrans;
-    uint32_t       tx_rto;
-    uint16_t       rx_ifindex;
-    uint32_t       rx_data_packets;
-    uint32_t       rx_packets;
-    uint32_t       rx_packets_queued;
-    uint32_t       rx_packets_drop;
-    uint32_t       rx_packets_reorder;
-    uint32_t       rx_packets_frag;
-    uint64_t       rx_bytes;
-    uint32_t       rx_ttl;
-    uint32_t       rtt;
-    struct APP_MSG app_msg;
-};
-
 /* define ringbuffer stats collected on records */
 struct STATS {
     uint64_t fs_records;
@@ -700,38 +267,7 @@ struct STATS {
     uint64_t fs_records_dropped;
     uint64_t fs_records_rb_max;
     uint64_t fs_events;
-    uint64_t q_push_added;
-    uint64_t q_push_updated;
-    uint64_t q_push_readded;
-    uint64_t q_pop_expired;
-    uint64_t q_pop_ignored;
-    uint64_t q_pop_missed;
 };
-
-/* define version info for executable files */
-struct XFILES {
-    char    *package;
-    char    *version;
-    char    *md5;
-    char    *sha256;
-    uint64_t size;
-    uint32_t mtime;
-    int      truncated;
-};
-
-/* define plugins types, functions and search path */
-enum PLUGIN_TYPE { P_DNS, P_HTTP, P_SYSLOG, P_VIRUS, P_VULN, P_DEVICE, P_INTERFACE, P_USER_GROUP, P_MAX };
-typedef int (*plugin_func)();
-typedef int plugin_dns_func(char *, int, struct APP_MSG_DNS *);
-typedef int plugin_http_func(char *, int, struct APP_MSG_HTTP *);
-typedef int plugin_syslog_func(char *, int, struct APP_MSG_SYSLOG *);
-typedef int plugin_virus_func(int, const char *, const char *, char *);
-struct bpf_map; /* eliminate compiler warning */
-typedef int plugin_vuln_func(struct bpf_map *, int *, char *, int, char *);
-typedef int plugin_device_func(char **, char **);
-typedef int plugin_interface_func(char **);
-typedef int plugin_user_group_func(int, char **);
-#define PLUGIN_PATH "../lib/"
 
 /* define output types */
 #define JSON_SUB_KEY_MAX    16
@@ -760,91 +296,20 @@ struct JSON_SUB_KEY {
 
 /* define json key index */
 enum INDEX_JSON_KEY {
-    I_INFO_SEQUENCE_NUMBER,
     I_INFO_TIMESTAMP,
-    I_INFO_MONITOR,
-    I_INFO_HOST_NAME,
-    I_INFO_HOST_IP,
-    I_INFO_HOST_TOKEN,
-    I_INFO_SYSTEM,
-    I_INFO_KERNEL,
-    I_INFO_VERSION,
-    I_INFO_UPTIME,
-    I_PROC_PARENT,
-    I_PROC,
-    I_PROC_VERSION,
-    I_PROC_USER,
-    I_PROC_GROUP,
-    I_PROC_PPID,
-    I_PROC_PID,
-    I_PROC_TID,
-    I_PROC_UID,
-    I_PROC_GID,
-    I_PROC_AGE,
     I_FILE_PATH,
     I_FILE,
-    I_FILE_ORIGIN,
-    I_FILE_VERSION,
     I_FILE_MODE,
     I_FILE_EVENT_COUNT,
     I_FILE_EVENTS,
-    I_FILE_EVENTS_DURATION,
     I_FILE_INODE,
     I_FILE_INODE_LINK_COUNT,
-    I_FILE_DEVICE,
-    I_FILE_PERMISSIONS,
-    I_FILE_USER,
-    I_FILE_GROUP,
-    I_FILE_UID,
-    I_FILE_GID,
     I_FILE_SIZE,
     I_FILE_SIZE_CHANGE,
     I_FILE_ACCESS_TIME,
     I_FILE_STATUS_CHANGE_TIME,
     I_FILE_MODIFICATION_TIME,
-    I_FILE_MODIFICATION_TIME_CHANGE,
-    I_FILE_CHECKSUM_MD5,
-    I_FILE_CHECKSUM_SHA256,
-    I_SOCK_PROTOCOL,
-    I_SOCK_ROLE,
-    I_SOCK_STATE,
-    I_SOCK_FAMILY,
-    I_SOCK_LOCAL_IP,
-    I_SOCK_LOCAL_PORT,
-    I_SOCK_REMOTE_IP,
-    I_SOCK_REMOTE_PORT,
-    I_SOCK_ADDRESS,
-    I_SOCK_TX_INTERFACE,
-    I_SOCK_TX_DATA_PACKETS,
-    I_SOCK_TX_PACKETS,
-    I_SOCK_TX_PACKETS_RETRANS,
-    I_SOCK_TX_PACKETS_DUPS,
-    I_SOCK_TX_FLAGS,
-    I_SOCK_TX_DURATION,
-    I_SOCK_TX_BYTES,
-    I_SOCK_TX_BYTES_ACKED,
-    I_SOCK_TX_BYTES_RETRANS,
-    I_SOCK_TX_RTO,
-    I_SOCK_RX_INTERFACE,
-    I_SOCK_RX_DATA_PACKETS,
-    I_SOCK_RX_PACKETS,
-    I_SOCK_RX_PACKETS_QUEUED,
-    I_SOCK_RX_PACKETS_DROP,
-    I_SOCK_RX_PACKETS_REORDER,
-    I_SOCK_RX_PACKETS_FRAG,
-    I_SOCK_RX_FLAGS,
-    I_SOCK_RX_DURATION,
-    I_SOCK_RX_BYTES,
-    I_SOCK_RX_TTL,
-    I_SOCK_RTT,
-    I_SOCK_AGE,
-    I_APP,
-    I_APP_TX_DNS,
-    I_APP_RX_DNS,
-    I_APP_TX_HTTP,
-    I_APP_RX_HTTP,
-    I_APP_TX_SYSLOG,
-    I_APP_RX_SYSLOG
+    I_MAX
 };
 
 /* JSON macro to get key */
@@ -885,28 +350,7 @@ enum MKJSON_VALUE_TYPE {
 /* define json output messages  */
 enum JSON_OBJ {
     J_INFO,
-    J_PROC,
-    J_SOCK,
-    J_SOCK_CLIENT_TX,
-    J_SOCK_CLIENT_RX,
-    J_SOCK_SERVER_RX,
-    J_SOCK_SERVER_TX,
-    J_SOCK_AGE,
     J_FILE,
-    J_FILE_CHECKSUM,
-    J_APP,
-    J_APP_CLIENT_TX_DNS,
-    J_APP_CLIENT_RX_DNS,
-    J_APP_CLIENT_TX_HTTP,
-    J_APP_CLIENT_RX_HTTP,
-    J_APP_CLIENT_TX_SYSLOG,
-    J_APP_CLIENT_RX_SYSLOG,
-    J_APP_SERVER_RX_DNS,
-    J_APP_SERVER_TX_DNS,
-    J_APP_SERVER_RX_HTTP,
-    J_APP_SERVER_TX_HTTP,
-    J_APP_SERVER_TX_SYSLOG,
-    J_APP_SERVER_RX_SYSLOG,
     JSON_OBJ_MAX
 };
 
@@ -918,7 +362,7 @@ const uint64_t crc64_tab[256] = {
     0xe478989fa00bd371UL, 0x7d08ff3b88be6f81UL, 0x07d08ff3b88be6f8UL, 0x88b81eabe8d57d73UL, 0xf2606e63d8e0f40aUL,
     0xbd301a4810ffd90eUL, 0xc7e86a8020ca5077UL, 0x4880fbd87094cbfcUL, 0x32588b1040a14285UL, 0xd620138fe0aa91f4UL,
     0xacf86347d09f188dUL, 0x2390f21f80c18306UL, 0x594882d7b0f40a7fUL, 0x1618f6fc78eb277bUL, 0x6cc0863448deae02UL,
-    0xe3a8176c18803589UL, 0x997067a428b5bcf0UL, 0xfa11fe77117cdf02UL, 0x80c98ebf2149567bUL, 0x0fa11fe77117cdf0UL,
+    0xe3a8176c18803589UL, 0x997067a428b5bcf0UL, 0xfa11fe77117cdf02UL, 0x80c98ebf2149567bUL, 0x0fa11fe771117cdf0UL,
     0x75796f2f41224489UL, 0x3a291b04893d698dUL, 0x40f16bccb908e0f4UL, 0xcf99fa94e9567b7fUL, 0xb5418a5cd963f206UL,
     0x513912c379682177UL, 0x2be1620b495da80eUL, 0xa489f35319033385UL, 0xde51839b2936bafcUL, 0x9101f7b0e12997f8UL,
     0xebd98778d11c1e81UL, 0x64b116208142850aUL, 0x1e6966e8b1770c73UL, 0x8719014c99c2b083UL, 0xfdc17184a9f739faUL,
