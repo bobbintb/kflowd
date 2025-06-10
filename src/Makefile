@@ -9,7 +9,8 @@
 
 OUTPUT := .output
 CLANG ?= clang
-LLVM_STRIP ?= llvm-strip
+# Adjust llvm-strip version if necessary for your environment
+LLVM_STRIP ?= llvm-strip-18
 LIBBPF_SRC := $(abspath ../libbpf/src)
 LIBBPF_OBJ := $(abspath $(OUTPUT)/libbpf.a)
 BINDIR := ../bin/

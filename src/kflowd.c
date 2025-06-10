@@ -142,13 +142,13 @@ static struct JSON_KEY jkey[] = {
 static struct JSON_SUB_KEY jsubkeys[] = {
     {I_FILE_EVENTS,
      {{"CREATE", "File created"},
-      {"OPEN", "File opened"},
-      {"OPEN_EXEC", "Executable file opened"},
-      {"ACCESS", "File accessed"},
-      {"ATTRIB", "File attribute changed"},
+      // {"OPEN", "File opened"}, // Removed
+      // {"OPEN_EXEC", "Executable file opened"}, // Removed
+      // {"ACCESS", "File accessed"}, // Removed
+      // {"ATTRIB", "File attribute changed"}, // Removed
       {"MODIFY", "File modified"},
-      {"CLOSE_NOWRITE", "File closed without write"},
-      {"CLOSE_WRITE", "File closed with write"},
+      // {"CLOSE_NOWRITE", "File closed without write"}, // Removed
+      // {"CLOSE_WRITE", "File closed with write"}, // Removed
       {"MOVED_FROM", "File moved or renamed from original name"},
       {"MOVED_TO", "File moved or renamed to new name"},
       {"DELETE", "File deleted"}}}
@@ -212,9 +212,9 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
     struct RECORD_FS   *rf = NULL;
     struct tm          *tm;
     char                ts_event_str[DATETIME_LEN_MAX];
-    char                ts_atime_str[DATETIME_LEN_MAX]; // Declared for atime
-    char                ts_ctime_str[DATETIME_LEN_MAX]; // Declared for ctime
-    char                ts_mtime_str[DATETIME_LEN_MAX]; // Declared for mtime
+    char                ts_atime_str[DATETIME_LEN_MAX];
+    char                ts_ctime_str[DATETIME_LEN_MAX];
+    char                ts_mtime_str[DATETIME_LEN_MAX];
     char                filename_buf[FILENAME_LEN_MAX] = {0};
     char               *pfilename;
     char               *pfilepath;
@@ -233,13 +233,11 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
 
     // record_count++; // Removed
 
-    time_sec_event = r->ts / (uint64_t)1e9; // Corrected: r->ts instead of r->rc.ts
+    time_sec_event = r->ts / (uint64_t)1e9;
     tm = gmtime(&time_sec_event);
-    // strftime(ts_event_str, sizeof(ts_event_str), "%a, %b %d %Y %H:%M:%S", tm); // Base part
-    // Corrected to prevent buffer overflow if strftime writes up to sizeof-1 and then snprintf appends.
     len = strftime(ts_event_str, sizeof(ts_event_str), "%Y-%m-%dT%H:%M:%S", tm);
     snprintf(ts_event_str + len, sizeof(ts_event_str) - len,
-             ".%09luZ", (r->ts % (uint64_t)1e9)); // Corrected: r->ts
+             ".%09luZ", (r->ts % (uint64_t)1e9));
 
 
     if (!(r->type == RECORD_TYPE_FILE))
@@ -247,7 +245,16 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
 
     rf = (struct RECORD_FS *)r;
     pfilepath = (char *)rf->filepath;
-    pfilename = (char *)rf->filename;
+
+    // Updated logic for pfilename based on I_MOVED_TO event
+    if (rf->event[I_MOVED_TO] && rf->filename_to[0]) {
+        snprintf(filename_buf, sizeof(filename_buf), "%s>%s", rf->filename_from, rf->filename_to);
+        pfilename = filename_buf;
+    } else {
+        strncpy(filename_buf, (char*)rf->filename, sizeof(filename_buf) - 1);
+        filename_buf[sizeof(filename_buf)-1] = '\0'; // Ensure null termination
+        pfilename = filename_buf;
+    }
 
     time_sec_event = rf->atime_nsec / (uint64_t)1e9;
     tm = gmtime(&time_sec_event);
@@ -267,25 +274,15 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
     snprintf(ts_ctime_str + len, sizeof(ts_ctime_str) - len,
              ".%09luZ", (rf->ctime_nsec % (uint64_t)1e9));
 
-    // TABLE_OUTPUT block removed
-
-    // Updated logic for pfilename based on I_MOVED_TO event
-    if (rf->event[I_MOVED_TO] && rf->filename_to[0]) {
-        snprintf(filename_buf, sizeof(filename_buf), "%s>%s", rf->filename_from, rf->filename_to);
-        pfilename = filename_buf;
-    } else {
-        pfilename = (char*)rf->filename; // Default to filename if not a MOVED_TO or filename_to is empty
-    }
-
     snprintf(mode_str, sizeof(mode_str), "%s", S_ISLNK(rf->imode) ? "symlink" : (rf->inlink > 1 ? "hardlink" : "regular"));
 
     char file_events_json[FILE_EVENTS_LEN_MAX] = {0};
     snprintf(file_events_json, sizeof(file_events_json), "{");
     for (cntf = 0; cntf < FS_EVENT_MAX; ++cntf) {
-        if (rf->event[cntf]) {
+        if (rf->event[fsevt[cntf].index]) {
             len = strlen(file_events_json);
-            snprintf(file_events_json + len, sizeof(file_events_json) - len, "\"%s\": %u, ", fsevt[cntf].name, rf->event[cntf]);
-            events_count += rf->event[cntf];
+            snprintf(file_events_json + len, sizeof(file_events_json) - len, "\"%s\": %u, ", fsevt[cntf].name, rf->event[fsevt[cntf].index]);
+            events_count += rf->event[fsevt[cntf].index];
         }
     }
     len = strlen(file_events_json);
@@ -307,13 +304,14 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
         J_UINT, JKEY(I_FILE_INODE_LINK_COUNT), rf->inlink,
         J_LLUINT, JKEY(I_FILE_SIZE), rf->isize,
         J_LLINT, JKEY(I_FILE_SIZE_CHANGE), file_size_change,
-        J_STRING, JKEY(I_FILE_ACCESS_TIME), ts_atime_str,       // Use formatted atime
-        J_STRING, JKEY(I_FILE_STATUS_CHANGE_TIME), ts_ctime_str, // Use formatted ctime
-        J_STRING, JKEY(I_FILE_MODIFICATION_TIME), ts_mtime_str  // Use formatted mtime
+        J_STRING, JKEY(I_FILE_ACCESS_TIME), ts_atime_str,
+        J_STRING, JKEY(I_FILE_STATUS_CHANGE_TIME), ts_ctime_str,
+        J_STRING, JKEY(I_FILE_MODIFICATION_TIME), ts_mtime_str
     );
 
     if (temp_json_out) {
         strncpy(json_msg_final, temp_json_out, sizeof(json_msg_final) - 1);
+        json_msg_final[sizeof(json_msg_final)-1] = '\0'; // Ensure null termination
         free(temp_json_out);
     } else {
         snprintf(json_msg_final, sizeof(json_msg_final), "{\"error\":\"JSON generation failed\"}");
@@ -346,9 +344,6 @@ int main(int argc, char **argv) {
     struct ring_buffer *rb = NULL;
     int                 check[CHECK_MAX] = {c_ok, c_ok, c_ok};
     char                checkmsg[CHECK_MSG_LEN_MAX];
-    // int                 sock_udp_send; // Removed as unused
-    // struct sockaddr_in  name_addr;  // Removed as unused
-    // socklen_t           namelen = sizeof(name_addr); // Removed as unused
     struct timespec     spec;
     char                cmd_output[CMD_OUTPUT_LEN_MAX] = {0};
     char                cmd[CMD_LEN_MAX] = {0};
@@ -391,8 +386,6 @@ int main(int argc, char **argv) {
                 config.output_type = JSON_MIN;
             else if (!strncmp(optarg, "json", strlen(optarg)))
                  config.output_type = JSON_FULL;
-            // else if (!strncmp(optarg, "table", strlen(optarg))) // Removed table option
-            //      config.output_type = TABLE_OUTPUT;
             else
                 usage("Invalid output option specified. Use 'json' or 'json-min'.");
             argn += 2;
@@ -887,3 +880,5 @@ static char *mkjson(enum MKJSON_CONTAINER_TYPE otype, int count, ...) {
     free(chunks);
     return json_str;
 }
+
+// [end of src/kflowd.c] // This was the duplicate to be removed
