@@ -99,9 +99,6 @@ static struct option longopts[] = {{"legend", no_argument, NULL, 'l'},
 
 /* define globals */
 static struct kflowd_bpf *skel;
-// static uint64_t           record_count = 0; // Removed
-// static struct utsname     utsn = {0}; // Not strictly needed for core JSON
-// static char               hostip[INET6_ADDRSTRLEN] = {0}; // Not strictly needed for core JSON
 static struct timespec    spec_start;
 static volatile bool      running = false;
 
@@ -141,20 +138,13 @@ static struct JSON_KEY jkey[] = {
 static struct JSON_SUB_KEY jsubkeys[] = {
     {I_FILE_EVENTS,
      {{"CREATE", "File created"},
-      // {"OPEN", "File opened"}, // Removed
-      // {"OPEN_EXEC", "Executable file opened"}, // Removed
-      // {"ACCESS", "File accessed"}, // Removed
-      // {"ATTRIB", "File attribute changed"}, // Removed
       {"MODIFY", "File modified"},
-      // {"CLOSE_NOWRITE", "File closed without write"}, // Removed
-      // {"CLOSE_WRITE", "File closed with write"}, // Removed
       {"MOVED_FROM", "File moved or renamed from original name"},
       {"MOVED_TO", "File moved or renamed to new name"},
       {"DELETE", "File deleted"}}}
 };
 
 /* static function prototypes */
-// static int   udp_send_msg(char *, struct CONFIG *); // Removed
 static int unix_socket_send_msg(char *msg, const char *socket_path);
 static char *mkjson(enum MKJSON_CONTAINER_TYPE, int, ...);
 static char *mkjson_prettify(const char *, char *);
@@ -219,7 +209,6 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
     char               *pfilename;
     char               *pfilepath;
     char                mode_str[MODE_LEN_MAX];
-    // bool                is_moved_to = false; // Removed
     long                time_sec_event;
     int                 events_count = 0;
     char                json_msg_final[JSON_OUT_LEN_MAX] = {0};
@@ -230,8 +219,6 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
 
     (void)ctx;
     (void)data_sz;
-
-    // record_count++; // Removed
 
     time_sec_event = r->ts / (uint64_t)1e9;
     tm = gmtime(&time_sec_event);
@@ -630,41 +617,6 @@ static int unix_socket_send_msg(char *msg, const char *socket_path) {
     return 0;
 }
 
-// static int udp_send_msg(char *msg, struct CONFIG *config) { // Removed
-//     int                 sock;
-//     struct sockaddr_in6 server_addr;
-//     char                server6[INET6_ADDRSTRLEN + 8] = {0};
-//     char               *server;
-//     int                 cnt;
-//
-//     sock = socket(PF_INET6, SOCK_DGRAM, 0);
-//     if (sock < 0) {
-//         perror("Failed to create UDP socket");
-//         return 1;
-//     }
-//
-//     for (cnt = 0; cnt < config->output_udp_num; cnt++) {
-//         server = config->output_udp_host[cnt];
-//         if (AF_INET == config->output_udp_family[cnt]) {
-//             snprintf(server6, sizeof(server6), "::FFFF:%s", config->output_udp_host[cnt]);
-//             server = server6;
-//         }
-//
-//         memset(&server_addr, 0, sizeof(server_addr));
-//         server_addr.sin6_family = AF_INET6;
-//         inet_pton(AF_INET6, server, &server_addr.sin6_addr);
-//         server_addr.sin6_port = htons(config->output_udp_port[cnt]);
-//         if (sendto(sock, msg, strlen(msg), 0, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-//             perror("Failed to send message to UDP server:");
-//             close(sock);
-//             return 1;
-//         }
-//     }
-//
-//     close(sock);
-//     return 0;
-// }
-
 static int mkjson_sprintf(char **strp, const char *fmt, ...) {
     int     len;
     va_list ap;
@@ -886,5 +838,3 @@ static char *mkjson(enum MKJSON_CONTAINER_TYPE otype, int count, ...) {
     free(chunks);
     return json_str;
 }
-
-// [end of src/kflowd.c] // This was the duplicate to be removed
