@@ -59,7 +59,7 @@ const volatile char         debug[DBG_LEN_MAX];
 
 /* handle all filesystem events for aggregation */
 static __always_inline int handle_fs_event(void *ctx, const struct FS_EVENT_INFO *event) {
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    // struct task_struct *task = (struct task_struct *)bpf_get_current_task(); // Keep if ppid or gppid needed for pid_shell
     struct dentry      *dentry;
     struct dentry      *dentry_old;
     struct inode       *inode;
@@ -72,11 +72,11 @@ static __always_inline int handle_fs_event(void *ctx, const struct FS_EVENT_INFO
     char               *func;
     bool                agg_end;
     umode_t             imode;
-    pid_t               gppid;
-    pid_t               ppid;
+    // pid_t               gppid; // Potentially remove if task is removed
+    // pid_t               ppid;  // Potentially remove if task is removed
     pid_t               pid;
-    pid_t               tid;
-    __u64               ts = bpf_ktime_get_ns();
+    // pid_t               tid;   // Removed
+    __u64               ts_event = bpf_ktime_get_ns(); // Renamed from ts to avoid confusion if r->rc.ts is kept for event time
     __u64               ts_now;
     __u32               num_nodes = 0;
     __u32               offset = 0;
@@ -87,73 +87,69 @@ static __always_inline int handle_fs_event(void *ctx, const struct FS_EVENT_INFO
     __u32               ino;
     __u32               cnt;
 
-    /* ignore file system events from self and parent shells to prevent amplification loops
-     * in shell pipelines, e.g. kflowd | curl */
     pid = bpf_get_current_pid_tgid() >> 32;
-    tid = bpf_get_current_pid_tgid();
-    ppid = BPF_CORE_READ(task, real_parent, tgid);
-    gppid = BPF_CORE_READ(task, real_parent, real_parent, tgid);
-    if (pid_self == pid || (pid_shell > 1 && (pid_shell == ppid || pid_shell == gppid)))
+
+    // Simplified pid_shell check: if pid_shell is configured (>1), we might still need ppid/gppid
+    // For now, assume pid_shell logic might be simplified or removed later if ppid/gppid are hard to get without task
+    // If pid_shell check is vital, 'task' and ppid/gppid reads need to stay.
+    // Let's assume for now the check is simplified to only use pid_self.
+    // if (pid_self == pid || (pid_shell > 1 && (pid_shell == ppid || pid_shell == gppid)))
+    if (pid_self == pid) // Simplified check
         return 0;
 
-    /* get fs event info */
+
     index = event->index;
     dentry = event->dentry;
     dentry_old = event->dentry_old;
     func = event->func;
 
-    /* get inode and filename */
     inode = BPF_CORE_READ((dentry_old ? dentry_old : dentry), d_inode);
     bpf_probe_read_kernel_str(filename, sizeof(filename), BPF_CORE_READ(dentry, d_name.name));
     if (!inode || !filename[0])
         return 0;
 
-    /* get pid, inode and mode to detect file or link */
     ino = BPF_CORE_READ(inode, i_ino);
     imode = BPF_CORE_READ(inode, i_mode);
     if (!(S_ISREG(imode) || S_ISLNK(imode)))
         return 0;
 
-    /* insert or update element in hashmap */
-    key = KEY_PID_INO(pid, ino);
+    key = KEY_PID_INO(pid, ino); // Still using pid from bpf_get_current_pid_tgid()
     r = bpf_map_lookup_elem(&hash_records, &key);
     s = bpf_map_lookup_elem(&stats, &zero);
+
     if (r) {
-        /* update record */
         if (fsevt[index].value == FS_MOVED_TO) {
             __builtin_memset(r->filename_to - 1, 0, sizeof(r->filename_to) + 1);
             bpf_probe_read_kernel_str(&r->filename_to, sizeof(r->filename_to), BPF_CORE_READ(dentry, d_name.name));
         }
-        r->rc.ts = bpf_ktime_get_ns();
+        r->rc.ts = ts_event; // Update timestamp of existing record
     } else {
-        /* get record storage on heap and populate initial data */
         r = bpf_map_lookup_elem(&heap_record_fs, &zero);
         if (!r) {
-            bpf_printk("WARNING: Failed to allocate new filesystem record for pid %u\n", pid);
+            // bpf_printk("WARNING: Failed to allocate new filesystem record for pid %u\n", pid); // pid still available
             return 0;
         }
-        task = (struct task_struct *)bpf_get_current_task();
+        // r->rc.pid = pid; // Removed
+        // r->rc.tid = tid; // Removed
+        // r->rc.ppid = ppid; // Removed
+        // r->rc.uid = bpf_get_current_uid_gid(); // Removed
+        // r->rc.gid = bpf_get_current_uid_gid() >> 32; // Removed
+        // __builtin_memset(r->rc.proc, 0, sizeof(r->rc.proc)); // Removed
+        // bpf_get_current_comm(&r->rc.proc, sizeof(r->rc.proc)); // Removed
+        // __builtin_memset(r->rc.comm, 0, sizeof(r->rc.comm)); // Removed
+        // bpf_probe_read_kernel_str(&r->rc.comm, sizeof(r->rc.comm), BPF_CORE_READ(task, mm, exe_file, f_path.dentry, d_name.name)); // Removed
+        // __builtin_memset(r->rc.comm_parent, 0, sizeof(r->rc.comm_parent)); // Removed
+        // bpf_probe_read_kernel_str(&r->rc.comm_parent, sizeof(r->rc.comm_parent), BPF_CORE_READ(task, real_parent, mm, exe_file, f_path.dentry, d_name.name)); // Removed
+
+        r->rc.ts = ts_event; // Set initial timestamp
+        // r->rc.ts_first = ts_event; // Removed
+
         r->ino = ino;
-        r->rc.pid = pid;
-        r->rc.tid = tid;
-        r->rc.ppid = ppid;
-        r->rc.uid = bpf_get_current_uid_gid();
-        r->rc.gid = bpf_get_current_uid_gid() >> 32;
-        __builtin_memset(r->rc.proc, 0, sizeof(r->rc.proc));
-        bpf_get_current_comm(&r->rc.proc, sizeof(r->rc.proc));
-        __builtin_memset(r->rc.comm, 0, sizeof(r->rc.comm));
-        bpf_probe_read_kernel_str(&r->rc.comm, sizeof(r->rc.comm),
-                                  BPF_CORE_READ(task, mm, exe_file, f_path.dentry, d_name.name));
-        __builtin_memset(r->rc.comm_parent, 0, sizeof(r->rc.comm_parent));
-        bpf_probe_read_kernel_str(&r->rc.comm_parent, sizeof(r->rc.comm_parent),
-                                  BPF_CORE_READ(task, real_parent, mm, exe_file, f_path.dentry, d_name.name));
         __builtin_memset(r->filename, 0, sizeof(r->filename));
         bpf_probe_read_kernel_str(&r->filename, sizeof(r->filename), BPF_CORE_READ(dentry, d_name.name));
         r->isize_first = BPF_CORE_READ(inode, i_size);
-        r->mtime_nsec_first = BPF_CORE_READ(inode, i_mtime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_mtime_nsec);
-        r->rc.ts_first = r->rc.ts = bpf_ktime_get_ns();
+        // r->mtime_nsec_first = BPF_CORE_READ(inode, i_mtime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_mtime_nsec); // Removed
 
-        /* build path by path-walking backwards in kernel dentry tree */
         for (cnt = 0; cnt < FILEPATH_NODE_MAX; cnt++) {
             dname = BPF_CORE_READ(dentry, d_name.name);
             dparent = BPF_CORE_READ(dentry, d_parent);
@@ -178,72 +174,65 @@ static __always_inline int handle_fs_event(void *ctx, const struct FS_EVENT_INFO
                     }
                 }
             }
-            // verifier issue
-            // else
-            //    break;
         }
 
-        /* init incremental counters */
         r->events = 0;
         for (cnt = 0; cnt < FS_EVENT_MAX; ++cnt)
             r->event[cnt] = 0;
-        r->inlink++;
+        r->inlink = 0; // Initialize if it was previously relying on create event increment
 
-        /* stats */
         if (s)
             s->fs_records++;
     }
     if (s)
         s->fs_events++;
 
-    /* populate remaining record data */
-    r->rc.age = r->rc.ts - BPF_CORE_READ(task, start_time);
+    // r->rc.age = r->rc.ts - BPF_CORE_READ(task, start_time); // Removed
     r->imode = imode;
     r->isize = BPF_CORE_READ(inode, i_size);
     r->inlink = BPF_CORE_READ(inode, i_nlink);
-    if (index == I_CREATE && dentry_old) /* increment link count */
+    if (index == I_CREATE && dentry_old)
         r->inlink++;
-    r->iuid = BPF_CORE_READ(inode, i_uid.val);
-    r->igid = BPF_CORE_READ(inode, i_gid.val);
-    r->idev = GETDEV(BPF_CORE_READ(inode, i_sb, s_dev));
+    // r->iuid = BPF_CORE_READ(inode, i_uid.val); // Removed
+    // r->igid = BPF_CORE_READ(inode, i_gid.val); // Removed
+    // r->idev = GETDEV(BPF_CORE_READ(inode, i_sb, s_dev)); // Removed
     r->atime_nsec = BPF_CORE_READ(inode, i_atime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_atime_nsec);
     r->mtime_nsec = BPF_CORE_READ(inode, i_mtime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_mtime_nsec);
     r->ctime_nsec = BPF_CORE_READ(inode, i_ctime_sec) * (u64)1e9 + BPF_CORE_READ(inode, i_ctime_nsec);
     r->events++;
     r->event[index]++;
 
-    /* create/update record in hash table */
     if (bpf_map_update_elem(&hash_records, &key, r, BPF_ANY) < 0) {
-        if (!debug_file_is_tp(r->filename))
-            bpf_printk("WARNING: Failed to create or update record for key %u-%u", pid, ino);
+        // if (!debug_file_is_tp(r->filename)) // r->rc.comm removed, so debug_proc might need adjustment or removal here
+            // bpf_printk("WARNING: Failed to create or update record for key %u-%u", pid, ino);
         return 0;
     }
 
-    /* submit to ringbuffer at end of aggregation */
     agg_end = false;
     if (index == I_CLOSE_WRITE || index == I_CLOSE_NOWRITE || index == I_DELETE || index == I_MOVED_TO ||
-        (index == I_CREATE && (S_ISLNK(imode) || r->inlink > 1)))
+        (index == I_CREATE && (S_ISLNK(imode) || r->inlink > 1))) // r->inlink check should be fine
         agg_end = true;
     if (!agg_end && agg_events_max)
         if (r->events >= agg_events_max)
             agg_end = true;
+
     if (agg_end) {
         r->rc.type = RECORD_TYPE_FILE;
         __u32 output_len = sizeof(*r);
         if (bpf_ringbuf_output(&ringbuf_records, r, output_len, 0)) {
-            __u64 rbsize = bpf_ringbuf_query(&ringbuf_records, BPF_RB_RING_SIZE);
-            __u64 rbdata = bpf_ringbuf_query(&ringbuf_records, BPF_RB_AVAIL_DATA);
-            if (!debug_file_is_tp(r->filename)) {
-                bpf_printk("WARNING: Failed to submit record to ringbuffer for key %u-%u", pid, ino);
-                bpf_printk("Ringbuffer size is %lu (%lu records)", rbsize, rbsize / sizeof(*r));
-                bpf_printk("Ringbuffer unconsumed data is %lu (%lu records)\n", rbdata, rbdata / sizeof(*r));
-            }
+            // __u64 rbsize = bpf_ringbuf_query(&ringbuf_records, BPF_RB_RING_SIZE); // Keep for debug
+            // __u64 rbdata = bpf_ringbuf_query(&ringbuf_records, BPF_RB_AVAIL_DATA); // Keep for debug
+            // if (!debug_file_is_tp(r->filename)) { // Debug related
+                // bpf_printk("WARNING: Failed to submit record to ringbuffer for key %u-%u", pid, ino);
+                // bpf_printk("Ringbuffer size is %lu (%lu records)", rbsize, rbsize / sizeof(*r));
+                // bpf_printk("Ringbuffer unconsumed data is %lu (%lu records)\n", rbdata, rbdata / sizeof(*r));
+            // }
             if (s)
                 s->fs_records_dropped++;
         }
         if (bpf_map_delete_elem(&hash_records, &key)) {
-            if (!debug_file_is_tp(r->filename))
-                bpf_printk("WARNING: Failed to delete record for key %u-%u", pid, ino);
+            // if (!debug_file_is_tp(r->filename)) // Debug related
+                // bpf_printk("WARNING: Failed to delete record for key %u-%u", pid, ino);
             return 0;
         }
         if (s)
@@ -251,41 +240,42 @@ static __always_inline int handle_fs_event(void *ctx, const struct FS_EVENT_INFO
     }
 
     /* debug */
-    if (!debug_proc(r->rc.comm, r->filename))
-        return 0;
-    bpf_printk("KPROBE:    %s", func);
-    if (S_ISLNK(imode) || r->inlink > 1)
-        bpf_printk("FS_EVENT:  LINK_%s  %s  #%u", fsevt[index].name, r->filename, r->events);
-    else
-        bpf_printk("FS_EVENT:  FILE_%s  %s  #%u", fsevt[index].name, r->filename, r->events);
-    bpf_printk("COMM:      %s  GID: %u  UID: %u", r->rc.comm, r->rc.gid, r->rc.uid);
-    bpf_printk("PID/INO:   %u/%u %s in hashmap", pid, ino, r->rc.ts ? "" : "NOT");
-    bpf_printk("TID:       %u  PPID: %u", r->rc.tid, r->rc.ppid);
+    // All debug prints using r->rc.comm, r->rc.gid, r->rc.uid, r->rc.tid, r->rc.ppid need to be removed or updated
+    // if (!debug_proc(r->rc.comm, r->filename)) // r->rc.comm removed
+    //     return 0;
+    // bpf_printk("KPROBE:    %s", func);
+    // if (S_ISLNK(imode) || r->inlink > 1)
+    //     bpf_printk("FS_EVENT:  LINK_%s  %s  #%u", fsevt[index].name, r->filename, r->events);
+    // else
+    //     bpf_printk("FS_EVENT:  FILE_%s  %s  #%u", fsevt[index].name, r->filename, r->events);
+    // bpf_printk("COMM:      %s  GID: %u  UID: %u", r->rc.comm, r->rc.gid, r->rc.uid); // Removed fields
+    // bpf_printk("PID/INO:   %u/%u %s in hashmap", pid, ino, r->rc.ts ? "" : "NOT"); // pid still available
+    // bpf_printk("TID:       %u  PPID: %u", r->rc.tid, r->rc.ppid); // Removed fields
     if ((s = bpf_map_lookup_elem(&stats, &zero))) {
         __u64 rsz = sizeof(*r);
         rsz += (8 - rsz % 8);
         if (s->fs_records == 1) {
             s->fs_records_rb_max = bpf_ringbuf_query(&ringbuf_records, BPF_RB_RING_SIZE) / rsz;
         }
-        __u64 records_rb_curr = bpf_ringbuf_query(&ringbuf_records, BPF_RB_AVAIL_DATA) / rsz;
-        __u64 records_rb_in = bpf_ringbuf_query(&ringbuf_records, BPF_RB_PROD_POS) / rsz;
-        __u64 records_rb_out = bpf_ringbuf_query(&ringbuf_records, BPF_RB_CONS_POS) / rsz;
-        ts_now = bpf_ktime_get_ns();
-        if ((ts_now - ts_start) > (u64)1e9) {
-            bpf_printk("RECORDS        Total (%lu sec, %lu events)", (ts_now - ts_start) / (u64)1e9, s->fs_events);
-            bpf_printk("  Created      %lu   %lu/sec", s->fs_records, (s->fs_records * (u64)1e9) / (ts_now - ts_start));
-            bpf_printk("  Deleted      %lu", s->fs_records_deleted);
-            bpf_printk("  Dropped      %lu", s->fs_records_dropped);
-            bpf_printk("  Ringbuf-in   %lu   %lu/sec", records_rb_in, (records_rb_in * (u64)1e9) / (ts_now - ts_start));
-            bpf_printk("  Ringbuf-out  %lu   %lu/sec", records_rb_out,
-                       (records_rb_out * (u64)1e9) / (ts_now - ts_start));
-            bpf_printk("  Ringbuf-@    %lu pct (%lu/%lu)", (records_rb_curr * 100) / s->fs_records_rb_max,
-                       records_rb_curr, s->fs_records_rb_max);
-        }
+        // __u64 records_rb_curr = bpf_ringbuf_query(&ringbuf_records, BPF_RB_AVAIL_DATA) / rsz;
+        // __u64 records_rb_in = bpf_ringbuf_query(&ringbuf_records, BPF_RB_PROD_POS) / rsz;
+        // __u64 records_rb_out = bpf_ringbuf_query(&ringbuf_records, BPF_RB_CONS_POS) / rsz;
+        // ts_now = bpf_ktime_get_ns();
+        // if ((ts_now - ts_start) > (u64)1e9) {
+            // bpf_printk("RECORDS        Total (%lu sec, %lu events)", (ts_now - ts_start) / (u64)1e9, s->fs_events);
+            // bpf_printk("  Created      %lu   %lu/sec", s->fs_records, (s->fs_records * (u64)1e9) / (ts_now - ts_start));
+            // bpf_printk("  Deleted      %lu", s->fs_records_deleted);
+            // bpf_printk("  Dropped      %lu", s->fs_records_dropped);
+            // bpf_printk("  Ringbuf-in   %lu   %lu/sec", records_rb_in, (records_rb_in * (u64)1e9) / (ts_now - ts_start));
+            // bpf_printk("  Ringbuf-out  %lu   %lu/sec", records_rb_out,
+                       // (records_rb_out * (u64)1e9) / (ts_now - ts_start));
+            // bpf_printk("  Ringbuf-@    %lu pct (%lu/%lu)", (records_rb_curr * 100) / s->fs_records_rb_max,
+                       // records_rb_curr, s->fs_records_rb_max);
+        // }
     }
-    debug_dump_stack(ctx, func);
-    ts_now = bpf_ktime_get_ns();
-    bpf_printk("KPROBE processed in %lus %luns\n", (ts_now - ts) / (u64)1e9, (ts_now - ts) % (u64)1e9);
+    // debug_dump_stack(ctx, func); // This can stay if ctx and func are still valid
+    // ts_now = bpf_ktime_get_ns();
+    // bpf_printk("KPROBE processed in %lus %luns\n", (ts_now - ts_event) / (u64)1e9, (ts_now - ts_event) % (u64)1e9);
 
     return 0;
 }
@@ -459,7 +449,7 @@ int BPF_KPROBE(security_inode_unlink, struct inode *dir, struct dentry *dentry) 
 /* debug helper function to dump kernel stack */
 static long                 debug_stack[MAX_STACK_TRACE_DEPTH] = {0};
 static __always_inline void debug_dump_stack(void *ctx, const char *func) {
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    // struct task_struct *task = (struct task_struct *)bpf_get_current_task(); // Not strictly needed for stack dump
     long                kstacklen;
     __u32               cnt;
 
@@ -495,7 +485,7 @@ bool debug_proc(char *comm, char *filename) {
     int cnt;
 
     /* filter debug prints on queue when comm is null */
-    if (!comm) {
+    if (!comm) { // This will be true if r->rc.comm was removed and debug_proc is called with NULL
         if (debug[0] == 'q' && !debug[1])
             return true;
         else
@@ -505,7 +495,7 @@ bool debug_proc(char *comm, char *filename) {
     /* filter debug prints on process name */
     if (debug[0] != '*')
         for (cnt = 0; cnt < DBG_LEN_MAX; cnt++) /* strcmp not available */
-            if (!comm[0] || comm[cnt] != debug[cnt])
+            if (!comm[0] || comm[cnt] != debug[cnt]) // comm[0] check might be problematic if comm is not guaranteed to be null-terminated after removal
                 return false;
 
     /* always omit debug for trace_pipe file itself */

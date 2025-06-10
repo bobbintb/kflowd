@@ -191,12 +191,8 @@ struct FS_EVENT fsevt[] = {{I_CREATE, FS_CREATE, "CREATE", "CRE", "CR"},
 #define SYS_FILE_VMLINUX          "/sys/kernel/btf/vmlinux"
 #define CACHE_ENTRIES_MAX         65536
 #define MAP_RECORDS_MAX           65536
-// #define MAP_XFILES_MAX            65536 // Removed
 #define MAP_PIDS_MAX              8192
-// #define MAP_SOCKS_MAX             262144 // Removed
-// #define RECORD_SOCK_MAX           5 // Removed
 #define RECORD_TYPE_FILE          1
-// #define RECORD_TYPE_SOCK          2 // Removed
 #define TASK_COMM_LEN             32
 #define TASK_COMM_SHORT_LEN       16
 #define DNAME_INLINE_LEN          32
@@ -213,61 +209,19 @@ struct FS_EVENT fsevt[] = {{I_CREATE, FS_CREATE, "CREATE", "CRE", "CR"},
 #define CMD_OUTPUT_LEN_MAX        1024
 #define JSON_OUT_LEN_MAX          8192
 #define FS_EVENT_MAX              (int)(sizeof(fsevt) / sizeof(struct FS_EVENT))
-// #define SOCK_FLAGS_MAX            64 // Removed
-// #define SOCK_EXP_MAX              4 // Removed
 #define MODE_LEN_MAX              12
 #define DATETIME_LEN_MAX          64
 #define DEV_NAME_LEN_MAX          32
 #define DEV_FSTYPE_LEN_MAX        8
-// #define CHECKSUM_TYPE_MD5         0 // Removed
-// #define CHECKSUM_TYPE_SHA256      1 // Removed
-// #define CACHE_TYPE_USER           0 // Removed
-// #define CACHE_TYPE_GROUP          1 // Removed
-// #define MD5_DIGEST_STR_LEN        32 // Removed
-// #define MD5_DIGEST_LEN            16 // Removed
-// #define SHA256_DIGEST_STR_LEN     64 // Removed
-// #define SHA256_DIGEST_LEN         32 // Removed
 #define TOKEN_LEN_MAX             64
 #define DBG_LEN_MAX               16
 #define KEY_PID_INO(p, i)         ((__u64)p << 32 | i)
-// #define KEY_SOCK(h)               ((__u64)h) // Removed
 #define GETDEV(dev)               ((__u32)(dev >> 20)) << 8 | ((__u32)(dev & ((1U << 20) - 1)))
-// UDP_MONITOR_STR_LEN, UDP_MONITOR_OFS, UDP_SERVER_MAX, UDP_HOST_DEFAULT, UDP_PORT_DEFAULT removed
-// TCP_FLAGS_LEN_MAX, TCP_FLAGS_MAX removed
-// HTTP_*, DNS_*, SYSLOG_* removed (related to network monitoring)
-// UNIX_SEGS_MAX removed
-
-/* define application constants */
-// enum APP_TYPE and related macros removed (related to network monitoring)
-// APP_SYSLOG_UNIX, APP_MSG_MAX, APP_MSG_LEN_MIN, APP_MSG_LEN_MAX, APP_PORT_MAX removed
 
 /* define macros for startup requirement checks */
 #define CHECK_MAX         3
 #define CHECK_MSG_LEN_MAX 64
 enum check { c_fail, c_ok, c_warn };
-
-/* define network constants */
-// ETH_HLEN, ETH_P_IP, ETH_P_IPV6, AF_UNIX, AF_INET, AF_INET6, IP_ADDR_LEN_MAX removed
-// IP_RF, IP_DF, IP_MF, IP_OFFMASK removed
-// IPV6_NH_* removed
-// UDP_NONE, UDP_ESTABLISHED, UDP_CLOSE removed
-// SOCK_IDLE_TIMEOUT, SOCK_ACTIVE_TIMEOUT removed
-// SOCK_BINDADDR_LOCK, SOCK_BINDPORT_LOCK removed
-// SKB_DST_NOREF, SKB_DST_PTRMASK removed
-// enum ROLE and GET_ROLE_STR macro removed
-// TCP_NONE, TCP_FIN, TCP_SYN, TCP_RST, TCP_PSH, TCP_ACK, TCP_URG removed
-// struct TCP_FLAG and tcp_flags array removed
-// TCP_STATE_LEN_MAX, tcp_state_table removed
-// DNS_QTYPE_DEC_LEN_MAX, DNS_QTYPE_*, struct DNS_QTYPE and dns_qtypes array removed
-// DNS_QCLASS_*, DNS_OPCODE_*, DNS_RCODE_*, struct DNS_FLAGS removed
-// SYSLOG_FACILITY_LEN_MAX, SYSLOG_SEVERITY_LEN_MAX, SYSLOG_HEADER_*, SYSLOG_DEVLOG_SOCKET, SYSLOG_JOURNAL_SOCKET removed
-// syslog_facility_table, syslog_severity_table removed
-
-/* define decoded app messages removed */
-// struct APP_MSG_DNS, struct APP_MSG_HTTP, struct APP_MSG_SYSLOG, struct APP_MSG removed
-
-/* define socket info removed */
-// struct SOCK_INFO, struct SOCK_TUPLE, struct SOCK_QUEUE, struct SOCK_EVENT_INFO removed
 
 /* define filesystem event info for ringbuffer event handler */
 struct FS_EVENT_INFO {
@@ -280,16 +234,16 @@ struct FS_EVENT_INFO {
 /* define common record sent to ringbuffer for user */
 struct RECORD {
     uint32_t type;
-    uint32_t pid;
-    uint32_t tid;
-    uint32_t ppid;
-    uint32_t uid;
-    uint32_t gid;
-    uint64_t age;
-    char     proc[TASK_COMM_SHORT_LEN];
-    char     comm_parent[TASK_COMM_LEN];
-    char     comm[TASK_COMM_LEN];
-    uint64_t ts_first;
+    // uint32_t pid; // Removed
+    // uint32_t tid; // Removed
+    // uint32_t ppid; // Removed
+    // uint32_t uid; // Removed
+    // uint32_t gid; // Removed
+    // uint64_t age; // Removed
+    // char     proc[TASK_COMM_SHORT_LEN]; // Removed
+    // char     comm_parent[TASK_COMM_LEN]; // Removed
+    // char     comm[TASK_COMM_LEN]; // Removed
+    // uint64_t ts_first; // Removed
     uint64_t ts;
 };
 
@@ -301,14 +255,14 @@ struct RECORD_FS {
     uint32_t      ino;
     uint32_t      imode;
     uint32_t      inlink;
-    uint32_t      iuid;
-    uint32_t      igid;
-    uint32_t      idev;
+    // uint32_t      iuid; // Removed
+    // uint32_t      igid; // Removed
+    // uint32_t      idev; // Removed
     uint64_t      isize;
     uint64_t      atime_nsec;
     uint64_t      mtime_nsec;
     uint64_t      ctime_nsec;
-    uint64_t      mtime_nsec_first;
+    // uint64_t      mtime_nsec_first; // Removed
     uint64_t      isize_first;
     char          filepath[FILEPATH_LEN_MAX];
     union {
@@ -320,8 +274,6 @@ struct RECORD_FS {
     };
 };
 
-// struct RECORD_SOCK removed
-
 /* define ringbuffer stats collected on records */
 struct STATS {
     uint64_t fs_records;
@@ -329,12 +281,7 @@ struct STATS {
     uint64_t fs_records_dropped;
     uint64_t fs_records_rb_max;
     uint64_t fs_events;
-    // q_* fields removed
 };
-
-// struct XFILES removed
-// PLUGIN_TYPE enum, plugin_*_func typedefs, PLUGIN_PATH removed (related to plugins)
-// struct PLUGIN_INFO removed
 
 /* define output types */
 #define JSON_SUB_KEY_MAX    16
@@ -363,56 +310,45 @@ struct JSON_SUB_KEY {
 
 /* define json key index */
 enum INDEX_JSON_KEY {
-    I_INFO_SEQUENCE_NUMBER,
+    // I_INFO_SEQUENCE_NUMBER, // Removed
     I_INFO_TIMESTAMP,
-    I_INFO_MONITOR,
-    I_INFO_HOST_NAME,
-    I_INFO_HOST_IP,
-    I_INFO_HOST_TOKEN,
-    I_INFO_SYSTEM,
-    I_INFO_KERNEL,
-    I_INFO_VERSION,
-    I_INFO_UPTIME,
-    I_PROC_PARENT,
-    I_PROC,
-    // I_PROC_VERSION, // Removed
-    // I_PROC_USER, // Removed
-    // I_PROC_GROUP, // Removed
-    I_PROC_PPID,
-    I_PROC_PID,
-    I_PROC_TID,
-    I_PROC_UID,
-    I_PROC_GID,
-    I_PROC_AGE,
+    // I_INFO_MONITOR, // Removed
+    // I_INFO_HOST_NAME, // Removed
+    // I_INFO_HOST_IP, // Removed
+    // I_INFO_HOST_TOKEN, // Removed
+    // I_INFO_SYSTEM, // Removed
+    // I_INFO_KERNEL, // Removed
+    // I_INFO_VERSION, // Removed
+    // I_INFO_UPTIME, // Removed
+    // I_PROC_PARENT, // Removed
+    // I_PROC, // Removed
+    // I_PROC_PPID, // Removed
+    // I_PROC_PID, // Removed
+    // I_PROC_TID, // Removed
+    // I_PROC_UID, // Removed
+    // I_PROC_GID, // Removed
+    // I_PROC_AGE, // Removed
     I_FILE_PATH,
     I_FILE,
-    I_FILE_ORIGIN,
-    // I_FILE_VERSION, // Removed
+    // I_FILE_ORIGIN, // Removed
     I_FILE_MODE,
     I_FILE_EVENT_COUNT,
     I_FILE_EVENTS,
-    I_FILE_EVENTS_DURATION,
+    // I_FILE_EVENTS_DURATION, // Removed - relies on ts_first
     I_FILE_INODE,
     I_FILE_INODE_LINK_COUNT,
-    // I_FILE_DEVICE, // Removed
-    I_FILE_PERMISSIONS,
-    // I_FILE_USER, // Removed
-    // I_FILE_GROUP, // Removed
-    I_FILE_UID,
-    I_FILE_GID,
+    // I_FILE_PERMISSIONS, // Removed
+    // I_FILE_UID, // Removed - file attributes uid
+    // I_FILE_GID, // Removed - file attributes gid
     I_FILE_SIZE,
     I_FILE_SIZE_CHANGE,
     I_FILE_ACCESS_TIME,
     I_FILE_STATUS_CHANGE_TIME,
     I_FILE_MODIFICATION_TIME,
-    I_FILE_MODIFICATION_TIME_CHANGE,
-    // I_FILE_CHECKSUM_MD5, // Removed
-    // I_FILE_CHECKSUM_SHA256, // Removed
-    // I_SOCK_* keys removed
-    // I_APP_* keys removed
-    I_TS_FIRST,
-    I_TS,
-    I_MAX
+    // I_FILE_MODIFICATION_TIME_CHANGE, // Removed - relies on mtime_nsec_first
+    // I_TS_FIRST, // Removed
+    // I_TS, // Removed - this was for common record, individual event times are kept
+    I_MAX // Keep I_MAX for array sizing if still used, or remove if keys are fixed now
 };
 
 /* JSON macro to get key */
@@ -452,29 +388,9 @@ enum MKJSON_VALUE_TYPE {
 
 /* define json output messages  */
 enum JSON_OBJ {
-    J_INFO,
-    J_PROC,
-    // J_SOCK, // Removed
-    // J_SOCK_CLIENT_TX, // Removed
-    // J_SOCK_CLIENT_RX, // Removed
-    // J_SOCK_SERVER_RX, // Removed
-    // J_SOCK_SERVER_TX, // Removed
-    // J_SOCK_AGE, // Removed
+    J_INFO, // This will be simplified in kflowd.c if many Info* keys are gone
+    // J_PROC, // Proc related info is removed from general event
     J_FILE,
-    // J_FILE_CHECKSUM, // Removed
-    // J_APP, // Removed
-    // J_APP_CLIENT_TX_DNS, // Removed
-    // J_APP_CLIENT_RX_DNS, // Removed
-    // J_APP_CLIENT_TX_HTTP, // Removed
-    // J_APP_CLIENT_RX_HTTP, // Removed
-    // J_APP_CLIENT_TX_SYSLOG, // Removed
-    // J_APP_CLIENT_RX_SYSLOG, // Removed
-    // J_APP_SERVER_RX_DNS, // Removed
-    // J_APP_SERVER_TX_DNS, // Removed
-    // J_APP_SERVER_RX_HTTP, // Removed
-    // J_APP_SERVER_TX_HTTP, // Removed
-    // J_APP_SERVER_TX_SYSLOG, // Removed
-    // J_APP_SERVER_RX_SYSLOG, // Removed
     JSON_OBJ_MAX
 };
 
