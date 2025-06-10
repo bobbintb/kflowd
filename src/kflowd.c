@@ -29,6 +29,7 @@
 #include <netdb.h>
 #include <ifaddrs.h>
 #include <bpf/libbpf.h>
+#include <sys/un.h> // For sockaddr_un
 
 /* help and usage strings */
 static char title_str[] = "\e[1m  _     __ _                  _\n"
@@ -41,13 +42,13 @@ static char header_str[] = "\e[1;33mkflowd -- (c) 2024 Tarsal, Inc\e[0m\n"
                            "\e[0;33mKernel-based Process Monitoring via eBPF subsystem (" VERSION ")\e[0m\n";
 static char usage_str[] =
     "Usage:\n"
-    "  kflowd [-e EVENTS] [-o json|json-min] [-u IP:PORT] [-q] [-d] [-V] [-T TOKEN]\n"
+    "  kflowd [-e EVENTS] [-o json|json-min] [-x SOCKET_PATH] [-q] [-d] [-V] [-T TOKEN]\n"
     "         [-l] [--legend], [-h] [--help], [--version]\n"
     "  -e EVENTS                Max number of filesystem events per aggregated record until export\n"
     "                             (default: disabled, '1': no aggregation)\n"
     "  -o json                  Json output with formatting (default)\n"
     "     json-min              Json output with minimal formatting \n"
-    "  -u IP:PORT,...           UDP server(s) IPv4 or IPv6 address to send json output to.\n"
+    "  -x SOCKET_PATH           Unix domain socket path to send json output to.\n"
     "                           Output also printed to stdout console unless quiet option -q or\n"
     "                             daemon mode -d specified\n"
     "  -q                       Quiet mode to suppress output to stdout console\n"
@@ -66,7 +67,7 @@ static char usage_str[] =
     "                               'sudo cat /sys/kernel/debug/tracing/trace_pipe'\n\n"
     "Examples:\n"
     "  sudo ./kflowd                                                           # terminal mode\n"
-    "  sudo ./kflowd -u 1.2.3.4:2056,127.0.0.1:2057 -d                         # daemon mode\n"
+    "  sudo ./kflowd -x /tmp/kflowd.sock -d                                    # daemon mode\n"
     "  sudo ./kflowd -V -D '*'                                                 # debug mode\n"
     "  sudo ./kflowd --legend                                                  # show legend\n"
     "  sudo ./kflowd --version                                                 # show version\n\n";
@@ -76,7 +77,7 @@ static char doc_str[] =
     "The eBPF program traces kernel functions to monitor processes based on filesystem events.\n"
     "Events are aggregated and submitted into a ringbuffer where they are polled by the userspace\n"
     "control application and converted into messages in json output format.\n"
-    "Messages are printed to stdout console and can be sent via UDP protocol to specified hosts.\n\n";
+    "Messages are printed to stdout console and can be sent via Unix domain socket to a specified path.\n\n";
 
 static void usage(char *msg) {
     fprintf(stdout, "%s", header_str);
@@ -93,13 +94,11 @@ static bool          opt_version = false;
 static struct option longopts[] = {{"legend", no_argument, NULL, 'l'},
                                    {"help", no_argument, NULL, 'h'},
                                    {"version", no_argument, (int *)&opt_version, 1},
+                                   {"unix-socket", required_argument, NULL, 'x'},
                                    {0, 0, 0, 0}};
 
 /* define globals */
 static struct kflowd_bpf *skel;
-// static uint64_t           record_count = 0; // Removed
-// static struct utsname     utsn = {0}; // Not strictly needed for core JSON
-// static char               hostip[INET6_ADDRSTRLEN] = {0}; // Not strictly needed for core JSON
 static struct timespec    spec_start;
 static volatile bool      running = false;
 
@@ -110,12 +109,9 @@ static struct CONFIG {
     bool  mode_daemon;
     int   agg_events_max;
     int   output_type;
-    bool  output_udp;
-    char  output_udp_host[UDP_SERVER_MAX][INET6_ADDRSTRLEN];
-    short output_udp_port[UDP_SERVER_MAX];
-    int   output_udp_family[UDP_SERVER_MAX];
-    int   output_udp_num;
-    bool  output_udp_quiet;
+    char  output_unix_socket_path[UNIX_SOCKET_PATH_MAX];
+    bool  output_unix_socket; // Flag to indicate if socket path is set
+    bool  output_quiet;       // Generic quiet flag
     bool  verbose;
     char  token[TOKEN_LEN_MAX];
     char  debug[DBG_LEN_MAX];
@@ -142,20 +138,14 @@ static struct JSON_KEY jkey[] = {
 static struct JSON_SUB_KEY jsubkeys[] = {
     {I_FILE_EVENTS,
      {{"CREATE", "File created"},
-      // {"OPEN", "File opened"}, // Removed
-      // {"OPEN_EXEC", "Executable file opened"}, // Removed
-      // {"ACCESS", "File accessed"}, // Removed
-      // {"ATTRIB", "File attribute changed"}, // Removed
       {"MODIFY", "File modified"},
-      // {"CLOSE_NOWRITE", "File closed without write"}, // Removed
-      // {"CLOSE_WRITE", "File closed with write"}, // Removed
       {"MOVED_FROM", "File moved or renamed from original name"},
       {"MOVED_TO", "File moved or renamed to new name"},
       {"DELETE", "File deleted"}}}
 };
 
 /* static function prototypes */
-static int   udp_send_msg(char *, struct CONFIG *);
+static int unix_socket_send_msg(char *msg, const char *socket_path);
 static char *mkjson(enum MKJSON_CONTAINER_TYPE, int, ...);
 static char *mkjson_prettify(const char *, char *);
 
@@ -219,7 +209,6 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
     char               *pfilename;
     char               *pfilepath;
     char                mode_str[MODE_LEN_MAX];
-    // bool                is_moved_to = false; // Removed
     long                time_sec_event;
     int                 events_count = 0;
     char                json_msg_final[JSON_OUT_LEN_MAX] = {0};
@@ -230,8 +219,6 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
 
     (void)ctx;
     (void)data_sz;
-
-    // record_count++; // Removed
 
     time_sec_event = r->ts / (uint64_t)1e9;
     tm = gmtime(&time_sec_event);
@@ -325,15 +312,19 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
         json_out_final = json_msg_final;
     }
 
-    if (config.output_udp) {
-        udp_send_msg(json_out_final, &config);
-        if (config.output_udp_quiet)
+    if (config.output_unix_socket) {
+        unix_socket_send_msg(json_out_final, config.output_unix_socket_path);
+        if (config.output_quiet)
             return 0;
     }
 
     if (!config.mode_daemon) {
-        fprintf(stdout, "%s", json_out_final);
-        fprintf(stdout, "\n%c\n", 0x1e);
+        // Print to stdout if not in daemon mode AND
+        // ( (unix socket is not configured) OR (unix socket is configured AND quiet mode is NOT set) )
+        if (!config.output_unix_socket || (config.output_unix_socket && !config.output_quiet)) {
+            fprintf(stdout, "%s", json_out_final);
+            fprintf(stdout, "\n%c\n", 0x1e);
+        }
         fflush(stdout);
     }
 
@@ -369,7 +360,7 @@ int main(int argc, char **argv) {
     uname(&local_utsn);
 
 
-    while ((opt = getopt_long(argc, argv, ":e:o:u:qdT:lhVD:", longopts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, ":e:o:x:qdT:lhVD:", longopts, NULL)) != -1) {
         switch (opt) {
         case 'e':
             config.agg_events_max = atoi(optarg);
@@ -390,36 +381,17 @@ int main(int argc, char **argv) {
                 usage("Invalid output option specified. Use 'json' or 'json-min'.");
             argn += 2;
             break;
-        case 'u':
-            token = strtok(optarg, ",");
-            do {
-                char buf[INET6_ADDRSTRLEN];
-                pos = strrchr(token, ':') - token;
-                if (pos <= 0)
-                    usage("Invalid udp host or port specified");
-                pport = token + pos + 1;
-                token[pos] = 0;
-                for (cnt = 0; cnt < (int)strlen(pport); cnt++)
-                    if (!isdigit(pport[cnt]))
-                        invalid = true;
-                if (invalid || !atoi(pport) || strlen(pport) > 5)
-                    usage("Invalid udp port specified");
-                if (inet_pton(AF_INET, token, buf) > 0)
-                    config.output_udp_family[config.output_udp_num] = AF_INET;
-                else if (inet_pton(AF_INET6, token, buf) > 0)
-                    config.output_udp_family[config.output_udp_num] = AF_INET6;
-                else
-                    usage("Invalid udp ipv4 or ipv6 address specified");
-                strncpy(config.output_udp_host[config.output_udp_num], token, INET6_ADDRSTRLEN - 1);
-                config.output_udp_port[config.output_udp_num] = atoi(pport);
-                config.output_udp = true;
-                if (++config.output_udp_num >= UDP_SERVER_MAX)
-                    usage("Too many udp hosts specified");
-            } while ((token = strtok(NULL, ",")) != NULL);
+        case 'x':
+            if (strlen(optarg) >= UNIX_SOCKET_PATH_MAX)
+                usage("Unix socket path too long");
+            strncpy(config.output_unix_socket_path, optarg, UNIX_SOCKET_PATH_MAX -1);
+            config.output_unix_socket_path[UNIX_SOCKET_PATH_MAX -1] = '\0';
+            // TODO: Add a flag like config.output_unix_socket = true if needed for logic elsewhere
+    config.output_unix_socket = true;
             argn += 2;
             break;
         case 'q':
-            config.output_udp_quiet = true;
+    config.output_quiet = true;
             argn++;
             break;
         case 'd':
@@ -463,8 +435,8 @@ int main(int argc, char **argv) {
         }
     }
 
-    if ((config.mode_daemon || config.output_udp_quiet) && !config.output_udp)
-        usage("Invalid option -d or -q without -u specified");
+    if ((config.mode_daemon || config.output_quiet) && !config.output_unix_socket_path[0])
+        usage("Invalid option -d or -q without -x specified");
 
     if (geteuid()) {
         fprintf(stderr, "Run this program with sudo or as root user\n");
@@ -578,14 +550,11 @@ int main(int argc, char **argv) {
                 config.agg_events_max ? " " : "", config.agg_events_max == 1 ? " (no aggregation)" : "s");
 
     fprintf(stderr, "\e[0;%s\e[0m Output as %s to stdout\n",
-            (config.output_udp && (config.mode_daemon || config.output_udp_quiet)) ? "33m[-]" : "32m[+]",
+            (config.output_unix_socket && (config.mode_daemon || config.output_quiet)) ? "33m[-]" : "32m[+]",
             config.output_type == JSON_FULL    ? "json"
             : "json-min");
-    if (config.output_udp)
-        for (cnt = 0; cnt < config.output_udp_num; cnt++)
-            fprintf(stderr, "\e[0;32m[+]\e[0m Output to UDP server %s%s%s:%u\n",
-                    config.output_udp_family[cnt] == AF_INET6 ? "[" : "", config.output_udp_host[cnt],
-                    config.output_udp_family[cnt] == AF_INET6 ? "]" : "", config.output_udp_port[cnt]);
+    if (config.output_unix_socket)
+        fprintf(stderr, "\e[0;32m[+]\e[0m Output to Unix socket %s\n", config.output_unix_socket_path);
     if (config.verbose)
         fprintf(stderr, "\e[0;32m[+]\e[0m Verbose mode for userspace app enabled\n");
     if (config.debug[0])
@@ -593,7 +562,7 @@ int main(int argc, char **argv) {
                         "      'sudo cat /sys/kernel/debug/tracing/trace_pipe'\n");
     fprintf(stderr, "\nkflowd (" VERSION ") with PID %u successfully started in %s mode\n\n", skel->rodata->pid_self,
             config.mode_daemon ? "daemon" : "terminal");
-    if (!(config.mode_daemon || config.output_udp_quiet)) {
+    if (!config.mode_daemon && (!config.output_unix_socket || (config.output_unix_socket && !config.output_quiet))) {
         fprintf(stderr, "Press <RETURN> key for output\n");
         while (getchar() != '\n') {
         };
@@ -624,35 +593,24 @@ cleanup:
     return err < 0 ? -err : 0;
 }
 
-static int udp_send_msg(char *msg, struct CONFIG *config) {
-    int                 sock;
-    struct sockaddr_in6 server_addr;
-    char                server6[INET6_ADDRSTRLEN + 8] = {0};
-    char               *server;
-    int                 cnt;
+static int unix_socket_send_msg(char *msg, const char *socket_path) {
+    int sock;
+    struct sockaddr_un server_addr;
 
-    sock = socket(PF_INET6, SOCK_DGRAM, 0);
+    sock = socket(AF_UNIX, SOCK_DGRAM, 0);
     if (sock < 0) {
-        perror("Failed to create UDP socket");
+        perror("Failed to create unix socket");
         return 1;
     }
 
-    for (cnt = 0; cnt < config->output_udp_num; cnt++) {
-        server = config->output_udp_host[cnt];
-        if (AF_INET == config->output_udp_family[cnt]) {
-            snprintf(server6, sizeof(server6), "::FFFF:%s", config->output_udp_host[cnt]);
-            server = server6;
-        }
+    memset(&server_addr, 0, sizeof(struct sockaddr_un));
+    server_addr.sun_family = AF_UNIX;
+    strncpy(server_addr.sun_path, socket_path, sizeof(server_addr.sun_path) - 1);
 
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr.sin6_family = AF_INET6;
-        inet_pton(AF_INET6, server, &server_addr.sin6_addr);
-        server_addr.sin6_port = htons(config->output_udp_port[cnt]);
-        if (sendto(sock, msg, strlen(msg), 0, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-            perror("Failed to send message to UDP server:");
-            close(sock);
-            return 1;
-        }
+    if (sendto(sock, msg, strlen(msg), 0, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_un)) < 0) {
+        perror("Failed to send message to unix socket");
+        close(sock);
+        return 1;
     }
 
     close(sock);
@@ -880,5 +838,3 @@ static char *mkjson(enum MKJSON_CONTAINER_TYPE otype, int count, ...) {
     free(chunks);
     return json_str;
 }
-
-// [end of src/kflowd.c] // This was the duplicate to be removed

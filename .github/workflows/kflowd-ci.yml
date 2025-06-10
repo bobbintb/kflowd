@@ -14,11 +14,12 @@ jobs:
     - name: 'Create Build Environment'
       run:  |
         sudo apt update -y
-        sudo apt install -y libz-dev libelf-dev libcap-dev libbfd-dev libc6-dev-i386 pkg-config
+        sudo apt install -y libz-dev libelf-dev libcap-dev libbfd-dev libc6-dev-i386 pkg-config libbpf-dev
         sudo wget https://apt.llvm.org/llvm.sh
         sudo chmod u+x llvm.sh
         echo | sudo ./llvm.sh 16
         sudo apt install -y clang-tidy-16
+        sudo apt install -y socat # Install socat
         sudo rm -f /usr/bin/clang
         sudo ln -s /usr/bin/clang-16 /usr/bin/clang
         sudo rm -f /usr/bin/clang-tidy
@@ -65,6 +66,9 @@ jobs:
       run: |
         cd src
         make check
+      # It's important that kflowd is built before this step
+    - name: 'Run Unix Socket Test'
+      run: bash tests/test_unix_socket.sh
 
     - name: 'Build Packages'
       run:  |
