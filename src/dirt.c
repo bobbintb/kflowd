@@ -366,12 +366,9 @@ int main(int argc, char **argv) {
     int                 kminor = 0;
     struct stat         stats_check = {0};
     FILE               *fp = NULL;
-    char               *token;
     bool                invalid = false;
     int                 jit_enable = 0;
     int                 err;
-    long                pos;
-    char               *pport;
     int                 argn = 1;
     int                 cnt;
     int                 opt;
