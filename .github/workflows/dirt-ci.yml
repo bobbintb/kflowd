@@ -1,4 +1,4 @@
-name: kflowd-ci
+name: dirt-ci
 
 on:
   workflow_dispatch:
@@ -56,17 +56,17 @@ jobs:
         cd src
         make CROSS_COMPILE=aarch64-linux-gnu-
         mkdir -p arm64
-        mv ../bin/kflowd arm64/
+        mv ../bin/dirt arm64/
         make clean
         make
         mkdir -p x86_64
-        mv ../bin/kflowd x86_64/
+        mv ../bin/dirt x86_64/
 
     - name: 'Check with Static Code Analyzer'
       run: |
         cd src
         make check
-      # It's important that kflowd is built before this step
+      # It's important that dirt is built before this step
     - name: 'Run Unix Socket Test'
       run: bash tests/test_unix_socket.sh
 
@@ -85,11 +85,11 @@ jobs:
 
     - name: 'Update Version'
       run: |
-        VERSION=$(./bin/kflowd --version | cut -f2 -d\ )
+        VERSION=$(./bin/dirt --version | cut -f2 -d\ )
         git config user.name "GitHub Actions"
         git config user.email "<>"
         git checkout gh-stats
-        echo -e "{\"schemaVersion\": 1, \"label\": \"kflowd\", "\
+        echo -e "{\"schemaVersion\": 1, \"label\": \"dirt\", "\
                 "\"message\": \"$VERSION\", \"color\": \"blue\"}" > gh-stats-version.json
         git add gh-stats-version.json
         git commit -m "Updated json file to version $VERSION." || true
@@ -98,27 +98,27 @@ jobs:
     - name: 'Create Artifacts'
       run: |
         cd src
-        VERSION=$(../bin/kflowd --version | cut -f2 -d\ | cut -c2-)
-        mkdir -p kflowd-$VERSION
-        mv x86_64/ arm64/ kflowd-$VERSION/
-        tar -czvf kflowd-$VERSION.tgz kflowd-$VERSION
-        rm -rf kflowd-$VERSION
+        VERSION=$(../bin/dirt --version | cut -f2 -d\ | cut -c2-)
+        mkdir -p dirt-$VERSION
+        mv x86_64/ arm64/ dirt-$VERSION/
+        tar -czvf dirt-$VERSION.tgz dirt-$VERSION
+        rm -rf dirt-$VERSION
         mkdir -p ../artifacts
         mv *.tgz ../artifacts/
-        echo -e " The tar archive contains the kflowd binary and DEB and RPM packages for x86_64 and arm64 platforms.\n"\
-                "After extracting the archive run the command matching your distribution and platform to install kflowd:\n\n"\
-                "tar xzvf kflowd-$VERSION.tgz\n\n"\
-                "cd kflowd-$VERSION/x86_64/\n"\
-                "sudo apt install ./kflowd_${VERSION}_amd64.deb    # Debian\n"\
-                "sudo yum install ./kflowd_$VERSION.x86_64.rpm   # Redhat\n\n"\
-                "cd kflowd-$VERSION/arm64/\n"\
-                "sudo apt install ./kflowd_${VERSION}_arm64.deb    # Debian\n"\
-                "sudo yum install ./kflowd-$VERSION.aarch64.rpm  # Redhat" > ../artifacts/README
+        echo -e " The tar archive contains the dirt binary and DEB and RPM packages for x86_64 and arm64 platforms.\n"\
+                "After extracting the archive run the command matching your distribution and platform to install dirt:\n\n"\
+                "tar xzvf dirt-$VERSION.tgz\n\n"\
+                "cd dirt-$VERSION/x86_64/\n"\
+                "sudo apt install ./dirt_${VERSION}_amd64.deb    # Debian\n"\
+                "sudo yum install ./dirt_$VERSION.x86_64.rpm   # Redhat\n\n"\
+                "cd dirt-$VERSION/arm64/\n"\
+                "sudo apt install ./dirt_${VERSION}_arm64.deb    # Debian\n"\
+                "sudo yum install ./dirt-$VERSION.aarch64.rpm  # Redhat" > ../artifacts/README
 
     - name: 'Name Artifacts'
       run: |
         cd src
-        echo "ARTIFACT=kflowd-$(../bin/kflowd --version | cut -f2 -d\ | cut -c2-)" >> $GITHUB_ENV
+        echo "ARTIFACT=dirt-$(../bin/dirt --version | cut -f2 -d\ | cut -c2-)" >> $GITHUB_ENV
 
     - name: 'Upload Artifacts'
       uses: actions/upload-artifact@v4
