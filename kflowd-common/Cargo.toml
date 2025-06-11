@@ -1,0 +1,13 @@
+[package]
+name = "kflowd-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# aya-bpf is needed for Pod derive and other bpf specific types/macros
+# Using a version that's likely compatible with aya 0.12.x series
+aya-bpf = { version = "0.1.0-alpha.10", features = ["macros"] }
+libc = "0.2"
+
+[lib]
+crate-type = ["lib"]

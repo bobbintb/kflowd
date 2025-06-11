@@ -1,0 +1,16 @@
+# This configuration is for compiling Rust eBPF programs.
+# It tells cargo to compile for the BPF target and specifies
+# that only the 'core' part of the standard library should be built,
+# as eBPF programs run in a #![no_std] environment.
+
+[build]
+target = "bpfel-unknown-none" # Target for little-endian BPF
+
+# Might also need "bpfeb-unknown-none" for big-endian, depending on target architecture,
+# but bpfel is common.
+
+[unstable]
+# build-std is necessary for #![no_std] applications that still need parts of std like 'core'.
+# For eBPF, 'core' is typically the only part needed.
+build-std = ["core"]
+EOF
