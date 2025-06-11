@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 # Updated for aya 0.13.1 compatibility
 aya = { version = "0.13.1", features = ["async_tokio"] }
-aya-log-ebpf = "0.2.0"
-aya-bpf = { version = "0.2.0", features = ["macros"] } # Added explicit dependency
+aya-log = "0.2.1"
+aya-ebpf-macros = { version = "0.1.1" } # Added explicit dependency
 
 libc = "0.2"
 kflowd-common = { path = "../kflowd-common" }
