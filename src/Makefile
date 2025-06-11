@@ -1,5 +1,5 @@
 #
-# Makefile for kflowd
+# Makefile for dirt
 #
 # Authors: Dirk Tennie <dirk@tarsal.co>
 #          Barrett Lyon <blyon@tarsal.co>
@@ -10,8 +10,6 @@
 OUTPUT := .output
 CLANG ?= clang
 LLVM_STRIP ?= llvm-strip
-# LIBBPF_SRC := $(abspath ../libbpf/src) # Removed
-# LIBBPF_OBJ := $(abspath $(OUTPUT)/libbpf.a) # Removed
 BINDIR := ../bin/
 ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 KERNEL := $(shell uname -r)
@@ -23,16 +21,16 @@ VMLINUX := ../vmlinux/$(ARCH)/vmlinux.h
 GIT_VERSION := $(shell git describe --abbrev=4 --dirty --always --tags | cut -d '-' -f 1,2,4 | sed 's/-/./1')
 GLIBC_VERSION := ${shell ldd --version | head -n 1 | cut -d ')' -f2}
 CLANG_VERSION := ${shell clang --version | head -n 1 | sed 's/[^0-9.]*\([0-9.]*\).*/\1/'}
-# LIBBPF_VERSION := ${shell git submodule status ../libbpf | cut -d ' ' -f 4 | sed 's/[v()]//g'} # Removed
+LIBBPF_VERSION := ${shell pkg-config --modversion libbpf}
 DATETIME := $(shell date +'%b-%d-%Y_%H:%M:%S%z')
-INCLUDES := -I$(OUTPUT) -I$(dir $(VMLINUX)) # Removed -I../libbpf/include/uapi
+INCLUDES := -I$(OUTPUT) -I$(dir $(VMLINUX))
 CFLAGS := -Wextra -g -std=gnu99 -Wall -DDATETIME=\"$(DATETIME)\" -DVERSION=\"$(GIT_VERSION)\" -DKERNEL=\"$(KERNEL)\"\
-          -D ARCH=\"$(ARCH)\" -DCLANG_VERSION=\"$(CLANG_VERSION)\" # Removed -DLIBBPF_VERSION
+          -D ARCH=\"$(ARCH)\" -DCLANG_VERSION=\"$(CLANG_VERSION)\" -DLIBBPF_VERSION=\"$(LIBBPF_VERSION)\"
 CLANG_CHECKS := --checks=-*,clang-analyzer-*,-clang-analyzer-cplusplus* --warnings-as-errors=*
-LDFLAGS := -ldl -lbpf # Added -lbpf
+LDFLAGS := -ldl -lbpf
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 
-APPS = kflowd
+APPS = dirt
 
 CLANG_BPF_SYS_INCLUDES = $(shell $(CLANG) -v -E - </dev/null 2>&1 \
 	| sed -n '/<...> search starts here:/,/End of search list./{ s| \(/.*\)|-idirafter \1|p }')
@@ -68,13 +66,13 @@ clean:
 
 .PHONY: check
 check: $(APPS)
-	$(call msg,CHECK, kflowd.c $(CLANG_CHECKS))
-	$(Q)clang-tidy kflowd.c $(CLANG_CHECKS) -- $(CFLAGS) $(INCLUDES)
+	$(call msg,CHECK, dirt.c $(CLANG_CHECKS))
+	$(Q)clang-tidy dirt.c $(CLANG_CHECKS) -- $(CFLAGS) $(INCLUDES)
 
 .PHONY: test
 test:
 	$(call msg,TEST)
-	$(Q)echo | sudo ./kflowd | timeout 60 grep -m1 InfoSequenceNumber
+	$(Q)echo | sudo ./dirt | timeout 60 grep -m1 InfoSequenceNumber
 
 .PHONY: ctags
 ctags:
@@ -82,24 +80,24 @@ ctags:
 	$(Q)ctags -R $(shell pwd) /usr/include/ --exclude=vmlinux.h
 
 define NFPM
-name: kflowd
+name: dirt
 arch: $(PACKAGE_ARCH)
 platform: linux
 version: $(GIT_VERSION)
 provides:
-- kflowd
+- dirt
 maintainer: "Dirk Tennie <dirk@tarsal.co>"
 description: |
-  kflowd by Tarsal.co
+  dirt by Tarsal.co
   Kernel-based process monitoring for Linux via eBPF
 vendor: Tarsal.co
 homepage: https://www.tarsal.co
 license: "GPL 2.0"
 contents:
-- src: ../bin/kflowd
-  dst: /usr/local/bin/kflowd
-- src: ../src/kflowd.service
-  dst: /etc/systemd/system/kflowd.service
+- src: ../bin/dirt
+  dst: /usr/local/bin/dirt
+- src: ../src/dirt.service
+  dst: /etc/systemd/system/dirt.service
   type: config|noreplace
 scripts:
   preinstall: ./preinstall.sh
@@ -107,22 +105,22 @@ scripts:
 endef
 define NFPM_PRE
 #!/bin/sh
-echo "Stopping kflowd systemd service if running"
-systemctl stop kflowd || true
+echo "Stopping dirt systemd service if running"
+systemctl stop dirt || true
 endef
 define NFPM_POST
 #!/bin/sh
 echo "\nOnly on initial installation perform the following steps:"
 echo "- Configure UDP server(s) in systemd service file, e.g.
-    sudo vim /etc/systemd/system/kflowd.service
-      ExecStart=/usr/local/bin/kflowd -o json -v -c -u 1.2.3.4:2056,127.0.0.1:2057 -d"
+    sudo vim /etc/systemd/system/dirt.service
+      ExecStart=/usr/local/bin/dirt -o json -v -c -u 1.2.3.4:2056,127.0.0.1:2057 -d"
     sudo systemctl daemon-reload
-echo "- Enable kflowd systemd service to start automatically after reboot
-    sudo systemctl enable kflowd\n"
-echo "- Start kflowd systemd service and check status with the following commands:
-    sudo systemctl start kflowd
-    sudo systemctl status kflowd
-    sudo journalctl -fe -u kflowd\n"
+echo "- Enable dirt systemd service to start automatically after reboot
+    sudo systemctl enable dirt\n"
+echo "- Start dirt systemd service and check status with the following commands:
+    sudo systemctl start dirt
+    sudo systemctl status dirt
+    sudo journalctl -fe -u dirt\n"
 endef
 export NFPM
 export NFPM_PRE
@@ -142,18 +140,11 @@ $(OUTPUT):
 	$(call msg,MKDIR,$@)
 	$(Q)mkdir -p $@
 
-# Build libbpf # Removed section
-# $(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPUT)/libbpf
-#	$(Q)$(MAKE) CROSS_COMPILE=$(CROSS_COMPILE)g -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1\
-#		OBJDIR=$(dir $@)libbpf DESTDIR=$(dir $@)\
-#		INCLUDEDIR= LIBDIR= UAPIDIR=\
-#		install
-
 # Build BPF code
-$(OUTPUT)/%.bpf.o: %.bpf.c *.h $(VMLINUX) | $(OUTPUT) # Removed $(LIBBPF_OBJ) dependency
+$(OUTPUT)/%.bpf.o: %.bpf.c *.h $(VMLINUX) | $(OUTPUT)
 	$(call msg,BPF,$@)
 	$(Q)$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES) -c $(filter %.c,$^) -o $@
-	$(Q)$(LLVM_STRIP) -g $@ # strip useless DWARF info
+	$(Q)$(LLVM_STRIP) -g $@
 
 # Generate BPF skeletons
 $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) $(BPFTOOL)
@@ -168,10 +159,10 @@ $(OUTPUT)/%.o: %.c *.h | $(OUTPUT)
 	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -c $(filter %.c,$^) -o $@
 
 # Build application binary
-$(APPS): %: $(OUTPUT)/%.o | $(OUTPUT) # Removed $(LIBBPF_OBJ) dependency
+$(APPS): %: $(OUTPUT)/%.o | $(OUTPUT)
 	$(Q)mkdir -p $(BINDIR)
-	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $(BINDIR)$@ # -lbpf already added to LDFLAGS
-	$(call msg,VERSION,$(GIT_VERSION) ($(ARCH), clang $(CLANG_VERSION), glibc $(GLIBC_VERSION))) # Removed libbpf version
+	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $(BINDIR)$@
+	$(call msg,VERSION,$(GIT_VERSION) ($(ARCH), clang $(CLANG_VERSION), glibc $(GLIBC_VERSION), libbpf $(LIBBPF_VERSION)))
 	$(call msg,BINARY,$(BINDIR)$@)
 
 # delete failed targets
