@@ -1,5 +1,5 @@
 /*
- * kflowd.bpf.c
+ * dirt.bpf.c
  *
  * Authors: Dirk Tennie <dirk@tarsal.co>
  *          Barrett Lyon <blyon@tarsal.co>
@@ -8,7 +8,7 @@
  *
  */
 #include "vmlinux.h"
-#include "kflowd.h"
+#include "dirt.h"
 
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
