@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # Updated for aya 0.13.1 compatibility
-aya-bpf = { version = "0.2.0", features = ["macros"] }
+aya-ebpf-macros = { version = "0.1.1" }
 libc = "0.2"
 
 [lib]
