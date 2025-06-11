@@ -37,8 +37,8 @@ jobs:
         echo "deb [arch=arm64] http://ports.ubuntu.com/ focal-backports main multiverse universe" | sudo tee -a /etc/apt/sources.list
         echo "deb [arch=arm64] http://ports.ubuntu.com/ focal-updates main multiverse universe" | sudo tee -a /etc/apt/sources.list
         sudo apt update -y || true
-        sudo apt install -y libelf1:arm64
-        sudo apt install -y libz3-4:arm64
+        # sudo apt install -y libelf1:arm64
+        # sudo apt install -y libz3-4:arm64
         cd /usr/lib/aarch64-linux-gnu/
         sudo ln -s libelf.so.1 libelf.so
         sudo ln -s libz.so.1 libz.so
