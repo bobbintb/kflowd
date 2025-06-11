@@ -1,5 +1,5 @@
 /*
- * kflowd.c
+ * dirt.c
  *
  * Authors: Dirk Tennie <dirk@tarsal.co>
  *          Barrett Lyon <blyon@tarsal.co>
@@ -9,8 +9,8 @@
  */
 
 #include <stdint.h>
-#include "kflowd.h"
-#include "kflowd.skel.h"
+#include "dirt.h"
+#include "dirt.skel.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,17 +32,40 @@
 #include <sys/un.h> // For sockaddr_un
 
 /* help and usage strings */
-static char title_str[] = "\e[1m  _     __ _                  _\n"
-                          " | | __/ _| | _____      ____| |\n"
-                          " | |/ / |_| |/ _ \\ \\ /\\ / / _` |\n"
-                          " |   <|  _| | (_) \\ V  V / (_| |\n"
-                          " |_|\\_\\_| |_|\\___/ \\_/\\_/ \\__,_|\e[0m  by Tarsal.co\n";
+static char title_str[] = "\e[38;2;60;30;10m   .     .                                 ..              .\n"
+						  "    .  . . ..              :+.=-.     .:.           -.-.. .  .     .  .  ... \n"
+						  "      . ..:.         .  ...:+*+:.:-:. : : .  ...    :-:  .  . .     .     .  \n"
+						  "       . : :  ..      ....      .-.-. .:.    . .  .  ..      .     .  .    . \n"
+						  " .       .:. ....     . .   .::-=.-:. .  .   ...   . ...        .    .  . .  \n"
+						  "   .    .   .  .      .......-=**#+=:           .    .:.   .          . .... \n"
+						  "           .:.      ..:..::..-=--+**++#*..  :*@@*::: :.:.....    .     ...   \n"
+						  "    ....   :...:--::-==-.:::::-**=--+@@@=...:*##%+%@#++*=....  .  ...      . \n"
+						  "    .:..:=*+=++===-:::::.-+%@@@@@@@@@@@@@%-:.+@@#=-:-:++#-#@*:. .:-:.        \n"
+						  " .. ..:.:++%@@@@@@@@@@%==*@@@@@@@@@@@@@@@@@@@@@@@@:=*+**+:#-#@@=.::#@@:    . \n"
+						  " .:-+**%%=+====*@%#*%@@@@@@@#:-:+%-=:--+@@@@@@@@@@@%#++==+*::+@@@@@+.@-      \n"
+						  " .:+@@@#*#:**#@@@@@@@#@@@@@#:::=#@:++--**#=+=#+%*@#%@#+%@@@@@+=::@@@*@+.     \n"
+						  " .:*###%@#++-:.=@@@@@@-:-:-#@@@@@=+=*-*@*=@@@@@@@@:+%*+@@:..##*%#@#@@@*.     \n"
+						  "   =#@%*+=-*#%%@@%*#@@*@@@==·▄▄▄▄  ▪  ▄▄▄  ▄▄▄▄▄:=:=*#*+**=%@#@@@@*:-%@+%@@@#@@@@@#%@@%@@@+.     \n"
+						  "  .   :.#@@@+:=#@@@@@@@==@@%██▪ ██ ██ ▀▄ █·•██  #*#=-:-==:.-@@@@@@@%.+===%#=#@@@%*+@@@@=@@+.     \n"
+						  "    . .:@@%@@%---#@@@@@@%@%#▐█· ▐█▌▐█·▐▀▀▄  ▐█.▪++*=-+****#@@@@##**@#@@@@@@@%%*:  ..*@@@@@+..    \n"
+						  "   ...:.*@@@@@*--==%@@*@*%.*██. ██ ▐█▌▐█•█▌ ▐█▌·%%*-:-==+***=.-=+=+@@%@@+:%@@@@=..  :*@@@%-....  \n"
+						  "  .  :.......+%@@*==@@#*=*@@▀▀▀▀▀• ▀▀▀.▀  ▀ ▀▀▀ %+-++=-=++--+==:=+**@=*%@:==+%#=:.      ...*@@#= \n"
+						  "     .:..::.--::.-*@@@@@@@@*:..:.:::--==+:-+##%@@+*@@@%%@@%=.. .   .  -@@@@+.\n"
+						  " .    ..  :::.:...:-#@@@*@@#%@@@@@@@@@@@@@@@@@*=-+#@@@@@@@@@=         :@@@@% \n"
+						  "    ..    .:-=--::.:%@@@@%@@@@@@@@@@@@@@@@@@@@@@#@@@@@:**.:%+*#**#=   .=@@@* \n"
+						  " .  ..    ......:-=+#@@@@@@@=@@@#@*==*+#@@@@#-@@@@=@@@@@@@@**@#+-:* .      . \n"
+						  "   . .     .....   =+*%@@@@@@**:@@**-.=:..:=#-*%@@@@@@@=:..-**@#*#=          \n"
+						  "    ..    .....   .:-+*=--=%@@@@@@:=%@@@@@@@*-.%@#@@=  .::-+@@#-...        ..\n"
+						  ".   .     ....         .:-=+++=:.   . ....-=+--.@*@*  ........   .     ... . \n"
+						  ".  ......  .   .           . . .      ......-==-%@@=   .. ....       ... ... \n"
+						  "  ......    .               .         . .  ................        .   ..  . \n"
+						  ".    ...           +%##@@%+%@%##%@@@#%@@@@*=%%#@@%%%*:**=.       .      . .  \e[0m\n";
 
-static char header_str[] = "\e[1;33mkflowd -- (c) 2024 Tarsal, Inc\e[0m\n"
+static char header_str[] = "\e[1;33mdirt -- (c) 2024 Tarsal, Inc\e[0m\n"
                            "\e[0;33mKernel-based Process Monitoring via eBPF subsystem (" VERSION ")\e[0m\n";
 static char usage_str[] =
     "Usage:\n"
-    "  kflowd [-e EVENTS] [-o json|json-min] [-x SOCKET_PATH] [-q] [-d] [-V] [-T TOKEN]\n"
+    "  dirt [-e EVENTS] [-o json|json-min] [-x SOCKET_PATH] [-q] [-d] [-V] [-T TOKEN]\n"
     "         [-l] [--legend], [-h] [--help], [--version]\n"
     "  -e EVENTS                Max number of filesystem events per aggregated record until export\n"
     "                             (default: disabled, '1': no aggregation)\n"
@@ -66,13 +89,13 @@ static char usage_str[] =
     "                             Use command:\n"
     "                               'sudo cat /sys/kernel/debug/tracing/trace_pipe'\n\n"
     "Examples:\n"
-    "  sudo ./kflowd                                                           # terminal mode\n"
-    "  sudo ./kflowd -x /tmp/kflowd.sock -d                                    # daemon mode\n"
-    "  sudo ./kflowd -V -D '*'                                                 # debug mode\n"
-    "  sudo ./kflowd --legend                                                  # show legend\n"
-    "  sudo ./kflowd --version                                                 # show version\n\n";
+    "  sudo ./dirt                                                           # terminal mode\n"
+    "  sudo ./dirt -x /tmp/dirt.sock -d                                    # daemon mode\n"
+    "  sudo ./dirt -V -D '*'                                                 # debug mode\n"
+    "  sudo ./dirt --legend                                                  # show legend\n"
+    "  sudo ./dirt --version                                                 # show version\n\n";
 static char doc_str[] =
-    "kflowd provides an eBPF program running in Kernel context and its control application running\n"
+    "dirt provides an eBPF program running in Kernel context and its control application running\n"
     "in userspace.\n"
     "The eBPF program traces kernel functions to monitor processes based on filesystem events.\n"
     "Events are aggregated and submitted into a ringbuffer where they are polled by the userspace\n"
@@ -98,7 +121,7 @@ static struct option longopts[] = {{"legend", no_argument, NULL, 'l'},
                                    {0, 0, 0, 0}};
 
 /* define globals */
-static struct kflowd_bpf *skel;
+static struct dirt_bpf *skel;
 static struct timespec    spec_start;
 static volatile bool      running = false;
 
@@ -343,12 +366,9 @@ int main(int argc, char **argv) {
     int                 kminor = 0;
     struct stat         stats_check = {0};
     FILE               *fp = NULL;
-    char               *token;
     bool                invalid = false;
     int                 jit_enable = 0;
     int                 err;
-    long                pos;
-    char               *pport;
     int                 argn = 1;
     int                 cnt;
     int                 opt;
@@ -425,7 +445,7 @@ int main(int argc, char **argv) {
                 char dt[DATETIME_LEN_MAX];
                 strncpy(dt, DATETIME, DATETIME_LEN_MAX);
                 dt[11] = 0x20;
-                fprintf(stdout, "kflowd " VERSION " (built %s, Linux %s, %s, clang %s, glibc %u.%u, libbpf %s)\n", dt,
+                fprintf(stdout, "dirt " VERSION " (built %s, Linux %s, %s, clang %s, glibc %u.%u, libbpf %s)\n", dt,
                         KERNEL, ARCH, CLANG_VERSION, __GLIBC__, __GLIBC_MINOR__, LIBBPF_VERSION);
             }
             return 0;
@@ -449,7 +469,7 @@ int main(int argc, char **argv) {
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
 
-    skel = kflowd_bpf__open();
+    skel = dirt_bpf__open();
     if (!skel) {
         fprintf(stderr, "Failed to open and load BPF skeleton\n");
         return 1;
@@ -457,7 +477,7 @@ int main(int argc, char **argv) {
 
     if (config.mode_daemon) {
         if (daemon(true, true)) {
-            fprintf(stderr, "\nFailed to start kflowd in daemon mode\n");
+            fprintf(stderr, "\nFailed to start dirt in daemon mode\n");
             return 1;
         }
     }
@@ -474,13 +494,13 @@ int main(int argc, char **argv) {
         pclose(fp);
     }
 
-    err = kflowd_bpf__load(skel);
+    err = dirt_bpf__load(skel);
     if (err) {
         fprintf(stderr, "Failed to load and verify BPF skeleton\n");
         goto cleanup;
     }
 
-    err = kflowd_bpf__attach(skel);
+    err = dirt_bpf__attach(skel);
     if (err) {
         fprintf(stderr, "Failed to attach BPF skeleton\n");
         goto cleanup;
@@ -531,7 +551,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "\n");
 
     if (!check[0] || !check[1] || !check[2]) {
-        fprintf(stderr, "\nkflowd failed to start!\n\n");
+        fprintf(stderr, "\ndirt failed to start!\n\n");
         exit(EXIT_FAILURE);
     }
 
@@ -560,7 +580,7 @@ int main(int argc, char **argv) {
     if (config.debug[0])
         fprintf(stderr, "\e[0;32m[+]\e[0m Debug mode for kernel ebpf program enabled. Run command\n"
                         "      'sudo cat /sys/kernel/debug/tracing/trace_pipe'\n");
-    fprintf(stderr, "\nkflowd (" VERSION ") with PID %u successfully started in %s mode\n\n", skel->rodata->pid_self,
+    fprintf(stderr, "\ndirt (" VERSION ") with PID %u successfully started in %s mode\n\n", skel->rodata->pid_self,
             config.mode_daemon ? "daemon" : "terminal");
     if (!config.mode_daemon && (!config.output_unix_socket || (config.output_unix_socket && !config.output_quiet))) {
         fprintf(stderr, "Press <RETURN> key for output\n");
@@ -589,7 +609,7 @@ int main(int argc, char **argv) {
 
 cleanup:
     ring_buffer__free(rb);
-    kflowd_bpf__destroy(skel);
+    dirt_bpf__destroy(skel);
     return err < 0 ? -err : 0;
 }
 

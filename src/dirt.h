@@ -1,5 +1,5 @@
 /*
- * kflowd.h
+ * dirt.h
  *
  * Authors: Dirk Tennie <dirk@tarsal.co>
  *          Barrett Lyon <blyon@tarsal.co>
@@ -7,8 +7,8 @@
  * Copyright 2024 (c) Tarsal, Inc
  *
  */
-#ifndef __KFLOWD_H
-#define __KFLOWD_H
+#ifndef __DIRT_H
+#define __DIRT_H
 
 /* define minimal kernel requirement */
 #define KERNEL_VERSION_MIN 5
@@ -420,4 +420,4 @@ static inline uint64_t crc64(uint64_t crc, const unsigned char *s, uint64_t l) {
     return crc;
 }
 
-#endif /* __KFLOWD_H */
+#endif /* __DIRT_H */
