@@ -4,13 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya = { version = "0.12.0-rc.1", features = ["async_tokio"] }
-aya-log-ebpf = "0.2.0-rc.0"
+# Updated for aya 0.13.1 compatibility
+aya = { version = "0.13.1", features = ["async_tokio"] }
+aya-log-ebpf = "0.2.0"
+aya-bpf = { version = "0.2.0", features = ["macros"] } # Added explicit dependency
+
 libc = "0.2"
 kflowd-common = { path = "../kflowd-common" }
 
-# BPF programs are typically compiled as binaries
 [[bin]]
 name = "kflowd-bpf"
 path = "src/main.rs"
-EOF
