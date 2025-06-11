@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# aya-bpf is needed for Pod derive and other bpf specific types/macros
-# Using a version that's likely compatible with aya 0.12.x series
-aya-bpf = { version = "0.1.0-alpha.10", features = ["macros"] }
+# Updated for aya 0.13.1 compatibility
+aya-bpf = { version = "0.2.0", features = ["macros"] }
 libc = "0.2"
 
 [lib]
