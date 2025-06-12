@@ -5,16 +5,16 @@ edition = "2021"
 publish = false
 
 [dependencies]
-aya = { version = "0.11", features = ["async_tokio"] }
-aya-log = "0.1"
-anyhow = "1.0"
-thiserror = "1.0"
+aya-ebpf = { version = "0.11", features = ["macros"] } # For the eBPF program
+aya-log-ebpf = { version = "0.1" }                    # For logging in eBPF programs
+anyhow = "1.0"                                        # Typically for userspace loader
+thiserror = "1.0"                                     # Typically for userspace loader
 # Assuming tokio for async runtime, common with Aya examples
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "signal"] } # Typically for userspace loader
 
-# For logging
-env_logger = "0.9"
-log = "0.4"
+# For logging (userspace)
+env_logger = "0.9"                                    # Typically for userspace loader
+log = "0.4"                                           # Used by both, but configured by loader
 
 [lib]
 crate-type = ["cdylib", "rlib"]

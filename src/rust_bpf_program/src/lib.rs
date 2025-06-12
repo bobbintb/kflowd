@@ -1,7 +1,7 @@
 #![no_std]
 
 // We'll need this for C types if not already covered by Aya's prelude or bindings
-use aya_bpf::cty;
+use aya_ebpf::cty;
 
 // --- START: Translated from dirt.h ---
 
@@ -154,7 +154,7 @@ pub const FILEPATH_NODE_MAX: usize = 16;
 // --- END: Translated from dirt.h ---
 
 // --- START: BPF Map Definitions ---
-use aya_bpf::maps::{Array, LruHashMap, PerCpuArray, RingBuf};
+use aya_ebpf::maps::{Array, LruHashMap, PerCpuArray, RingBuf};
 // Structs RecordFs and Stats are defined above in this file.
 
 // Ring buffer for sending records to userspace
@@ -211,18 +211,18 @@ pub mod bindings {
     pub struct inode { pub _unused: [u8; 0] }
     #[repr(C)]
     pub struct qstr {
-        pub name: *const aya_bpf::cty::c_char,
+        pub name: *const aya_ebpf::cty::c_char,
     }
 }
 // --- END: Dummy Bindings ---
 
 // --- START: Core eBPF Program Logic (handle_fs_event) ---
 
-use aya_bpf::{
+use aya_ebpf::{
     BpfContext,
     helpers::{bpf_ktime_get_ns, bpf_probe_read_kernel_str},
 };
-use aya_bpf::bindings::BPF_ANY;
+use aya_ebpf::bindings::BPF_ANY;
 use crate::bindings::{dentry, inode}; // Use the local dummy bindings
 
 
@@ -232,7 +232,7 @@ fn read_kernel_str(src: *const cty::c_char, buf: &mut [u8]) -> Result<usize, i64
         return Err(1);
     }
     let len = unsafe {
-        bpf_probe_read_kernel_str(
+        aya_ebpf::helpers::bpf_probe_read_kernel_str(
             buf.as_mut_ptr() as *mut _,
             buf.len() as u32,
             src as *const _,
@@ -252,7 +252,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
         return Ok(());
     }
 
-    let pid_tgid = unsafe { aya_bpf::helpers::bpf_get_current_pid_tgid() };
+    let pid_tgid = unsafe { aya_ebpf::helpers::bpf_get_current_pid_tgid() };
     let pid = (pid_tgid >> 32) as u32;
 
     if unsafe { PID_SELF } == pid {
@@ -287,10 +287,10 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
 
     let mut filename_buf = [0u8; FILENAME_LEN_MAX];
     if !filename_src_ptr_from_dentry.is_null() {
-         match read_kernel_str(filename_src_ptr_from_dentry, &mut filename_buf) {
-            Ok(0) | Err(_) => return Ok(()),
-            Ok(len) if len == 0 => return Ok(()),
-            Ok(_) => {}
+         match aya_ebpf::helpers::bpf_probe_read_kernel_str(filename_src_ptr_from_dentry as *const _, FILENAME_LEN_MAX as u32, filename_buf.as_mut_ptr() as *mut _) {
+            len if len < 0 => return Err(len),
+            len if len == 0 => return Ok(()),
+            _ => {}
         }
     } else {
         return Ok(());
@@ -303,7 +303,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     }
 
     let key = key_pid_ino(pid, ino_val);
-    let ts_event = unsafe { bpf_ktime_get_ns() };
+    let ts_event = unsafe { aya_ebpf::helpers::bpf_ktime_get_ns() };
     let zero_key: u32 = 0;
 
     let r_for_aggregation_logic: RecordFs;
@@ -431,8 +431,8 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
 // --- END: Core eBPF Program Logic (handle_fs_event) ---
 
 // --- START: Kprobe Definitions ---
-use aya_bpf::macros::{kprobe, kretprobe};
-use aya_bpf::programs::ProbeContext;
+use aya_ebpf::macros::{kprobe, kretprobe};
+use aya_ebpf::programs::ProbeContext;
 // Bindings are from the dummy module defined near handle_fs_event
 // FsEventInfo, IndexFsEvent etc. are from the current crate (lib.rs)
 
