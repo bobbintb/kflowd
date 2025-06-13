@@ -149,7 +149,7 @@ use crate::bindings::{dentry, inode};
 fn try_read_kernel_str_bytes(src: *const u8, buf: &mut [u8]) -> Result<usize, i64> {
     if buf.is_empty() { return Err(1); } // EINVAL
     match unsafe { bpf_probe_read_kernel_str_bytes(src, buf) } {
-        Ok(_) => { // If Ok, success means buf is populated. Find length from null terminator.
+        Ok(_) => { // Success means buf is populated. Find length from null terminator.
             Ok(buf.iter().position(|&byte| byte == 0).unwrap_or(buf.len()))
         }
         Err(e) => Err(e as i64),
@@ -304,11 +304,11 @@ use aya_ebpf::programs::ProbeContext;
 static mut DENTRY_SYMLINK_TEMP: *const bindings::dentry = core::ptr::null_mut();
 
 #[kretprobe(section="kretprobe/do_filp_open")]
-pub fn do_filp_open(ctx: ProbeContext) -> u32 {
-    match try_do_filp_open(ctx) { Ok(ret) => ret, Err(_) => 1, }
+pub fn do_filp_open(ctx: ProbeContext) -> u32 { // Function name matches kernel symbol
+    match try_do_filp_open_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 
-fn try_do_filp_open(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_do_filp_open_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let filp_ptr = unsafe { (*ctx.regs).rax as *const bindings::file };
     if filp_ptr.is_null() { return Ok(0); }
@@ -325,10 +325,10 @@ fn try_do_filp_open(ctx: ProbeContext) -> Result<u32, i64> {
 }
 
 #[kprobe(section="kprobe/security_inode_link")]
-pub fn security_inode_link(ctx: ProbeContext) -> u32 {
-    match try_security_inode_link(ctx) { Ok(ret) => ret, Err(_) => 1, }
+pub fn security_inode_link(ctx: ProbeContext) -> u32 { // Function name matches kernel symbol
+    match try_security_inode_link_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
-fn try_security_inode_link(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_security_inode_link_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let old_dentry_ptr = ctx.arg::<*const bindings::dentry>(0).ok_or(1i64)?;
     let new_dentry_ptr = ctx.arg::<*const bindings::dentry>(2).ok_or(1i64)?;
@@ -341,20 +341,20 @@ fn try_security_inode_link(ctx: ProbeContext) -> Result<u32, i64> {
 }
 
 #[kprobe(section="kprobe/security_inode_symlink")]
-pub fn security_inode_symlink(ctx: ProbeContext) -> u32 {
-    match try_security_inode_symlink(ctx) { Ok(ret) => ret, Err(_) => 1, }
+pub fn security_inode_symlink(ctx: ProbeContext) -> u32 { // Function name matches kernel symbol
+    match try_security_inode_symlink_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
-fn try_security_inode_symlink(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_security_inode_symlink_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let dentry_ptr_arg = ctx.arg::<*const bindings::dentry>(1).ok_or(1i64)?;
     unsafe { DENTRY_SYMLINK_TEMP = dentry_ptr_arg }; Ok(0)
 }
 
 #[kprobe(section="kprobe/dput")]
-pub fn dput(ctx: ProbeContext) -> u32 {
-    match try_dput(ctx) { Ok(ret) => ret, Err(_) => 1, }
+pub fn dput(ctx: ProbeContext) -> u32 { // Function name matches kernel symbol
+    match try_dput_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
-fn try_dput(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_dput_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let dentry_ptr_arg = ctx.arg::<*const bindings::dentry>(0).ok_or(1i64)?;
     if unsafe { DENTRY_SYMLINK_TEMP.is_null() || DENTRY_SYMLINK_TEMP != dentry_ptr_arg } { return Ok(0); }
@@ -370,10 +370,10 @@ fn try_dput(ctx: ProbeContext) -> Result<u32, i64> {
 }
 
 #[kprobe(section="kprobe/notify_change")]
-pub fn notify_change(ctx: ProbeContext) -> u32 {
-    match try_notify_change(ctx) { Ok(ret) => ret, Err(_) => 1, }
+pub fn notify_change(ctx: ProbeContext) -> u32 { // Function name matches kernel symbol
+    match try_notify_change_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
-fn try_notify_change(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_notify_change_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let dentry_ptr = ctx.arg::<*const bindings::dentry>(0).ok_or(1i64)?;
     let _iattr_ptr = ctx.arg::<*const cty::c_void>(1).ok_or(1i64)?;
@@ -399,10 +399,10 @@ fn try_notify_change(ctx: ProbeContext) -> Result<u32, i64> {
 }
 
 #[kprobe(section="kprobe/__fsnotify_parent")]
-pub fn __fsnotify_parent(ctx: ProbeContext) -> u32 {
-    match try___fsnotify_parent(ctx) { Ok(ret) => ret, Err(_) => 1, }
+pub fn __fsnotify_parent(ctx: ProbeContext) -> u32 { // Function name matches kernel symbol
+    match try___fsnotify_parent_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
-fn try___fsnotify_parent(ctx: ProbeContext) -> Result<u32, i64> {
+fn try___fsnotify_parent_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let dentry_ptr = ctx.arg::<*const bindings::dentry>(0).ok_or(1i64)?;
     let fs_mask = ctx.arg::<u32>(1).ok_or(1i64)?;
@@ -422,10 +422,10 @@ fn try___fsnotify_parent(ctx: ProbeContext) -> Result<u32, i64> {
 }
 
 #[kprobe(section="kprobe/security_inode_rename")]
-pub fn security_inode_rename(ctx: ProbeContext) -> u32 {
-    match try_security_inode_rename(ctx) { Ok(ret) => ret, Err(_) => 1, }
+pub fn security_inode_rename(ctx: ProbeContext) -> u32 { // Function name matches kernel symbol
+    match try_security_inode_rename_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
-fn try_security_inode_rename(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_security_inode_rename_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let old_dentry_ptr = ctx.arg::<*const bindings::dentry>(1).ok_or(1i64)?;
     let new_dentry_ptr = ctx.arg::<*const bindings::dentry>(3).ok_or(1i64)?;
@@ -439,10 +439,10 @@ fn try_security_inode_rename(ctx: ProbeContext) -> Result<u32, i64> {
 }
 
 #[kprobe(section="kprobe/security_inode_unlink")]
-pub fn security_inode_unlink(ctx: ProbeContext) -> u32 {
-    match try_security_inode_unlink(ctx) { Ok(ret) => ret, Err(_) => 1, }
+pub fn security_inode_unlink(ctx: ProbeContext) -> u32 { // Function name matches kernel symbol
+    match try_security_inode_unlink_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
-fn try_security_inode_unlink(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_security_inode_unlink_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let dentry_ptr = ctx.arg::<*const bindings::dentry>(1).ok_or(1i64)?;
     let event_info = FsEventInfo { index: IndexFsEvent::IDelete, dentry: dentry_ptr as *const cty::c_void, dentry_old: core::ptr::null(), func_name: b"security_inode_unlink\0".as_ptr() as *const cty::c_char, };
