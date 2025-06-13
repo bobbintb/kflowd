@@ -467,5 +467,3 @@ fn try_security_inode_unlink_internal(ctx: ProbeContext) -> Result<u32, i64> {
 
 #[allow(dead_code)]
 fn placeholder_bpf_func() {}
-
-```
