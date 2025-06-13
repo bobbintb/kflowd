@@ -303,7 +303,7 @@ use aya_ebpf::programs::ProbeContext;
 #[inline] fn should_skip_kprobe(monitor_type: u32) -> bool { (unsafe { MONITOR } & monitor_type) == 0 }
 static mut DENTRY_SYMLINK_TEMP: *const bindings::dentry = core::ptr::null_mut();
 
-#[kretprobe("do_filp_open")]
+#[kretprobe]
 pub fn do_filp_open(ctx: ProbeContext) -> u32 {
     match try_do_filp_open_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
@@ -324,7 +324,7 @@ fn try_do_filp_open_internal(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe("security_inode_link")]
+#[kprobe]
 pub fn security_inode_link(ctx: ProbeContext) -> u32 {
     match try_security_inode_link_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
@@ -340,7 +340,7 @@ fn try_security_inode_link_internal(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_info)?; Ok(0)
 }
 
-#[kprobe("security_inode_symlink")]
+#[kprobe]
 pub fn security_inode_symlink(ctx: ProbeContext) -> u32 {
     match try_security_inode_symlink_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
@@ -350,7 +350,7 @@ fn try_security_inode_symlink_internal(ctx: ProbeContext) -> Result<u32, i64> {
     unsafe { DENTRY_SYMLINK_TEMP = dentry_ptr_arg }; Ok(0)
 }
 
-#[kprobe("dput")]
+#[kprobe]
 pub fn dput(ctx: ProbeContext) -> u32 {
     match try_dput_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
@@ -369,7 +369,7 @@ fn try_dput_internal(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_info)?; Ok(0)
 }
 
-#[kprobe("notify_change")]
+#[kprobe]
 pub fn notify_change(ctx: ProbeContext) -> u32 {
     match try_notify_change_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
@@ -398,7 +398,7 @@ fn try_notify_change_internal(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe("__fsnotify_parent")]
+#[kprobe]
 pub fn __fsnotify_parent(ctx: ProbeContext) -> u32 {
     match try___fsnotify_parent_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
@@ -421,7 +421,7 @@ fn try___fsnotify_parent_internal(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe("security_inode_rename")]
+#[kprobe]
 pub fn security_inode_rename(ctx: ProbeContext) -> u32 {
     match try_security_inode_rename_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
@@ -438,7 +438,7 @@ fn try_security_inode_rename_internal(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_to)?; Ok(0)
 }
 
-#[kprobe("security_inode_unlink")]
+#[kprobe]
 pub fn security_inode_unlink(ctx: ProbeContext) -> u32 {
     match try_security_inode_unlink_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
