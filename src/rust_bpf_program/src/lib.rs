@@ -121,7 +121,10 @@ pub static mut STATS: Array<Stats> = Array::with_max_entries(1, 0);
 
 // --- START: Global Variables (Loader Initialized) ---
 static mut PID_SELF: u32 = 0; static mut AGG_EVENTS_MAX: u32 = 0;
-static mut MONITOR: u32 = MONITOR_FILE; static mut TS_START: u64 = 0;
+static mut MONITOR: u32 = MONITOR_FILE;
+#[allow(dead_code)] // TS_START is not used in BPF code
+static mut TS_START: u64 = 0;
+#[allow(dead_code)] // DEBUG_MSG will be used by debugging utilities
 static mut DEBUG_MSG: [u8; DBG_LEN_MAX] = [0; DBG_LEN_MAX];
 // --- END: Global Variables ---
 
@@ -310,7 +313,6 @@ pub fn do_filp_open(ctx: RetProbeContext) -> u32 {
 
 fn try_do_filp_open_internal(ctx: RetProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
-    // Reverted to unsafe direct access to regs for return value, as read_return_value might not be suitable for all types or contexts.
     let filp_ptr = unsafe { (*ctx.regs).rax as *const bindings::file };
     if filp_ptr.is_null() { return Ok(0); }
     let f_mode_val: u32 = 0;
@@ -401,9 +403,10 @@ fn try_notify_change_internal(ctx: ProbeContext) -> Result<u32, i64> {
 
 #[kprobe]
 pub fn __fsnotify_parent(ctx: ProbeContext) -> u32 {
-    match try___fsnotify_parent_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
+    match try_fsnotify_parent_internal(ctx) { Ok(ret) => ret, Err(_) => 1, } // Corrected call
 }
-fn try___fsnotify_parent_internal(ctx: ProbeContext) -> Result<u32, i64> {
+// Corrected internal function name to snake_case
+fn try_fsnotify_parent_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let dentry_ptr = ctx.arg::<*const bindings::dentry>(0).ok_or(1i64)?;
     let fs_mask = ctx.arg::<u32>(1).ok_or(1i64)?;
