@@ -7,9 +7,7 @@ fn panic(_info: &PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
 
-// Import macros explicitly
 use aya_ebpf_macros::{map, kprobe, kretprobe};
-
 use aya_ebpf::cty;
 
 // --- START: Translated from dirt.h ---
@@ -133,20 +131,22 @@ pub mod bindings {
     #[repr(C)] pub struct inode { pub _unused: [u8; 0] }
     #[repr(C)] pub struct file { pub _unused: [u8; 0] }
     #[repr(C)] pub struct qstr { pub name: *const aya_ebpf::cty::c_char, }
+    #[repr(C)] pub struct pt_regs { pub rax: u64, /* ... other regs ... */ } // Simplified for ctx.regs.rax
 }
 // --- END: Dummy Bindings ---
 
 // --- START: Core eBPF Program Logic (handle_fs_event) ---
-// Removed `use aya_ebpf::EbpfContext;` as it's unused.
 use aya_ebpf::helpers::{bpf_ktime_get_ns, bpf_probe_read_kernel_str_bytes};
 use aya_ebpf::bindings::BPF_ANY;
 use crate::bindings::{dentry, inode};
 
 #[inline]
 fn try_read_kernel_str_bytes(src: *const u8, buf: &mut [u8]) -> Result<usize, i64> {
-    if buf.is_empty() { return Err(1); }
-    match unsafe { bpf_probe_read_kernel_str_bytes(src, buf) } { // Removed third '0' argument
-        Ok(bytes_read) => Ok(bytes_read),
+    if buf.is_empty() { return Err(1); } // EINVAL
+    // bpf_probe_read_kernel_str_bytes(src: *const u8, dest: &mut [u8]) -> Result<usize, c_long>
+    // The Ok(usize) is length read including null terminator.
+    match unsafe { bpf_probe_read_kernel_str_bytes(src, buf) } {
+        Ok(bytes_read_including_null) => Ok(bytes_read_including_null),
         Err(e) => Err(e as i64),
     }
 }
@@ -158,8 +158,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
         return Ok(());
     }
 
-    // bpf_get_current_pid_tgid is unsafe, but the block is not needed if it's the only expr.
-    let pid_tgid = aya_ebpf::helpers::bpf_get_current_pid_tgid();
+    let pid_tgid = aya_ebpf::helpers::bpf_get_current_pid_tgid(); // This helper is unsafe
     let pid = (pid_tgid >> 32) as u32;
 
     if unsafe { PID_SELF } == pid { return Ok(()); }
@@ -182,7 +181,6 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
 
     let mut filename_buf = [0u8; FILENAME_LEN_MAX];
     if !filename_src_ptr_from_dentry.is_null() {
-        // Use the corrected wrapper
         match try_read_kernel_str_bytes(filename_src_ptr_from_dentry as *const u8, &mut filename_buf) {
             Ok(0) => return Ok(()),
             Err(e) => return Err(e),
@@ -194,7 +192,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     if !(s_isreg(imode_val) || s_islnk(imode_val)) { return Ok(()); }
 
     let key = key_pid_ino(pid, ino_val);
-    let ts_event = unsafe { aya_ebpf::helpers::bpf_ktime_get_ns() }; // bpf_ktime_get_ns is used
+    let ts_event = unsafe { aya_ebpf::helpers::bpf_ktime_get_ns() };
     let zero_key: u32 = 0;
     let r_for_aggregation_logic: RecordFs;
 
@@ -243,7 +241,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
             }
             unsafe { HASH_RECORDS.insert(&key, &r_current, BPF_ANY as u64) }?;
             r_for_aggregation_logic = r_current;
-            if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } { // Corrected to get_ptr_mut
+            if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } {
                 unsafe { (*stats_val_ptr).fs_records = (*stats_val_ptr).fs_records.saturating_add(1); }
             }
         } else { return Err(1); }
@@ -268,18 +266,18 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
         let mut r_to_send = r_for_aggregation_logic;
         r_to_send.rc.type_ = RECORD_TYPE_FILE;
         if unsafe { RINGBUF_RECORDS.output(&r_to_send, 0) }.is_err() {
-            if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } { // Corrected
+            if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } {
                 unsafe { (*stats_val_ptr).fs_records_dropped = (*stats_val_ptr).fs_records_dropped.saturating_add(1); }
             }
         }
         if unsafe { HASH_RECORDS.remove(&key) }.is_ok() {
-            if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } { // Corrected
+            if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } {
                 unsafe { (*stats_val_ptr).fs_records_deleted = (*stats_val_ptr).fs_records_deleted.saturating_add(1); }
             }
         }
     }
 
-    if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } { // Corrected
+    if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } {
         let stats_val = unsafe { &mut *stats_val_ptr };
         let record_fs_size = core::mem::size_of::<RecordFs>();
         if record_fs_size > 0 {
@@ -294,21 +292,19 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
 // --- END: Core eBPF Program Logic (handle_fs_event) ---
 
 // --- START: Kprobe Definitions ---
-// use aya_ebpf::macros::{kprobe, kretprobe}; // Already imported at the top
 use aya_ebpf::programs::ProbeContext;
 
 #[inline] fn should_skip_kprobe(monitor_type: u32) -> bool { (unsafe { MONITOR } & monitor_type) == 0 }
 static mut DENTRY_SYMLINK_TEMP: *const bindings::dentry = core::ptr::null_mut();
 
-#[kretprobe(name="do_filp_open")]
-pub fn do_filp_open(ctx: ProbeContext) -> u32 {
+#[kretprobe(fn="do_filp_open")] // Changed name=".." to fn="..."
+pub fn do_filp_open_kretprobe(ctx: ProbeContext) -> u32 { // Renamed for clarity if needed
     match try_do_filp_open(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 
 fn try_do_filp_open(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
-    // Corrected kretprobe return value reading for x86_64 (example)
-    let filp_ptr = ctx.regs.rax as *const bindings::file;
+    let filp_ptr = unsafe { (*ctx.regs).rax as *const bindings::file }; // Corrected access to rax
     if filp_ptr.is_null() { return Ok(0); }
     let f_mode_val: u32 = 0;
     let f_path_dentry_ptr: *const bindings::dentry = core::ptr::null();
@@ -322,8 +318,8 @@ fn try_do_filp_open(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe(name="security_inode_link")]
-pub fn security_inode_link(ctx: ProbeContext) -> u32 {
+#[kprobe(fn="security_inode_link")]
+pub fn security_inode_link_kprobe(ctx: ProbeContext) -> u32 {
     match try_security_inode_link(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_security_inode_link(ctx: ProbeContext) -> Result<u32, i64> {
@@ -338,8 +334,8 @@ fn try_security_inode_link(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_info)?; Ok(0)
 }
 
-#[kprobe(name="security_inode_symlink")]
-pub fn security_inode_symlink(ctx: ProbeContext) -> u32 {
+#[kprobe(fn="security_inode_symlink")]
+pub fn security_inode_symlink_kprobe(ctx: ProbeContext) -> u32 {
     match try_security_inode_symlink(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_security_inode_symlink(ctx: ProbeContext) -> Result<u32, i64> {
@@ -348,8 +344,8 @@ fn try_security_inode_symlink(ctx: ProbeContext) -> Result<u32, i64> {
     unsafe { DENTRY_SYMLINK_TEMP = dentry_ptr_arg }; Ok(0)
 }
 
-#[kprobe(name="dput")]
-pub fn dput(ctx: ProbeContext) -> u32 {
+#[kprobe(fn="dput")]
+pub fn dput_kprobe(ctx: ProbeContext) -> u32 {
     match try_dput(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_dput(ctx: ProbeContext) -> Result<u32, i64> {
@@ -367,8 +363,8 @@ fn try_dput(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_info)?; Ok(0)
 }
 
-#[kprobe(name="notify_change")]
-pub fn notify_change(ctx: ProbeContext) -> u32 {
+#[kprobe(fn="notify_change")]
+pub fn notify_change_kprobe(ctx: ProbeContext) -> u32 {
     match try_notify_change(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_notify_change(ctx: ProbeContext) -> Result<u32, i64> {
@@ -396,8 +392,8 @@ fn try_notify_change(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe(name="__fsnotify_parent")]
-pub fn __fsnotify_parent(ctx: ProbeContext) -> u32 {
+#[kprobe(fn="__fsnotify_parent")]
+pub fn __fsnotify_parent_kprobe(ctx: ProbeContext) -> u32 {
     match try___fsnotify_parent(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try___fsnotify_parent(ctx: ProbeContext) -> Result<u32, i64> {
@@ -419,8 +415,8 @@ fn try___fsnotify_parent(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe(name="security_inode_rename")]
-pub fn security_inode_rename(ctx: ProbeContext) -> u32 {
+#[kprobe(fn="security_inode_rename")]
+pub fn security_inode_rename_kprobe(ctx: ProbeContext) -> u32 {
     match try_security_inode_rename(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_security_inode_rename(ctx: ProbeContext) -> Result<u32, i64> {
@@ -436,8 +432,8 @@ fn try_security_inode_rename(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_to)?; Ok(0)
 }
 
-#[kprobe(name="security_inode_unlink")]
-pub fn security_inode_unlink(ctx: ProbeContext) -> u32 {
+#[kprobe(fn="security_inode_unlink")]
+pub fn security_inode_unlink_kprobe(ctx: ProbeContext) -> u32 {
     match try_security_inode_unlink(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_security_inode_unlink(ctx: ProbeContext) -> Result<u32, i64> {
