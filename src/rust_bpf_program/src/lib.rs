@@ -298,19 +298,19 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
 // --- END: Core eBPF Program Logic (handle_fs_event) ---
 
 // --- START: Kprobe Definitions ---
-use aya_ebpf::programs::ProbeContext;
+use aya_ebpf::programs::{ProbeContext, RetProbeContext}; // Added RetProbeContext
 
 #[inline] fn should_skip_kprobe(monitor_type: u32) -> bool { (unsafe { MONITOR } & monitor_type) == 0 }
 static mut DENTRY_SYMLINK_TEMP: *const bindings::dentry = core::ptr::null_mut();
 
 #[kretprobe]
-pub fn do_filp_open(ctx: ProbeContext) -> u32 {
+pub fn do_filp_open(ctx: RetProbeContext) -> u32 {
     match try_do_filp_open_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 
-fn try_do_filp_open_internal(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_do_filp_open_internal(ctx: RetProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
-    let filp_ptr = unsafe { (*ctx.regs).rax as *const bindings::file };
+    let filp_ptr = ctx.read_return_value::<*const bindings::file>()?;
     if filp_ptr.is_null() { return Ok(0); }
     let f_mode_val: u32 = 0;
     let f_path_dentry_ptr: *const bindings::dentry = core::ptr::null();
