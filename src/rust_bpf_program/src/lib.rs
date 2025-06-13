@@ -132,9 +132,6 @@ pub mod bindings {
     #[repr(C)] pub struct file { pub _unused: [u8; 0] }
     #[repr(C)] pub struct qstr { pub name: *const aya_ebpf::cty::c_char, }
     #[repr(C)] pub struct pt_regs {
-        // This is a simplified representation for x86_64.
-        // The actual definition is in kernel headers and much more complex.
-        // We only include rax for the purpose of kretprobe return value.
         pub r15: u64, pub r14: u64, pub r13: u64, pub r12: u64, pub rbp: u64, pub rbx: u64,
         pub r11: u64, pub r10: u64, pub r9: u64, pub r8: u64, pub rax: u64, pub rcx: u64,
         pub rdx: u64, pub rsi: u64, pub rdi: u64, pub orig_rax: u64, pub rip: u64,
@@ -150,9 +147,9 @@ use crate::bindings::{dentry, inode};
 
 #[inline]
 fn try_read_kernel_str_bytes(src: *const u8, buf: &mut [u8]) -> Result<usize, i64> {
-    if buf.is_empty() { return Err(1); } // EINVAL
+    if buf.is_empty() { return Err(1); }
     match unsafe { bpf_probe_read_kernel_str_bytes(src, buf) } {
-        Ok(_) => { // If Ok, success means buf is populated. Find length from null terminator.
+        Ok(_) => {
             Ok(buf.iter().position(|&byte| byte == 0).unwrap_or(buf.len()))
         }
         Err(e) => Err(e as i64),
@@ -313,7 +310,8 @@ pub fn do_filp_open(ctx: RetProbeContext) -> u32 {
 
 fn try_do_filp_open_internal(ctx: RetProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
-    let filp_ptr = ctx.read_return_value::<*const bindings::file>()?;
+    // Reverted to unsafe direct access to regs for return value, as read_return_value might not be suitable for all types or contexts.
+    let filp_ptr = unsafe { (*ctx.regs).rax as *const bindings::file };
     if filp_ptr.is_null() { return Ok(0); }
     let f_mode_val: u32 = 0;
     let f_path_dentry_ptr: *const bindings::dentry = core::ptr::null();
@@ -460,3 +458,5 @@ fn try_security_inode_unlink_internal(ctx: ProbeContext) -> Result<u32, i64> {
 
 #[allow(dead_code)]
 fn placeholder_bpf_func() {}
+
+```
