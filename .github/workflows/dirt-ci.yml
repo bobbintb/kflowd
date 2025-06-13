@@ -27,6 +27,13 @@ jobs:
         sudo rm -f /usr/bin/llvm-strip
         sudo ln -s /usr/bin/llvm-strip-16 /usr/bin/llvm-strip
 
+    - name: 'Install Rust'
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        echo "$HOME/.cargo/bin" >> $GITHUB_ENV
+        rustup target add aarch64-unknown-linux-gnu
+        rustup target add x86_64-unknown-linux-gnu
+
     - name: 'Prepare Cross-Compilation'
       run:  |
         sudo apt install -y gcc-aarch64-linux-gnu

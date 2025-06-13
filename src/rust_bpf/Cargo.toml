@@ -1,0 +1,38 @@
+[package]
+name = "rust_bpf"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+aya-ebpf = "0.1.1" # Renamed from aya-bpf to aya-ebpf
+aya-log-ebpf = "0.1.1" # Removed printk feature
+
+[package.metadata.cargo-xtask]
+features = ["default"]
+
+[profile.dev]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
+
+[workspace]
+members = ["xtask"]
