@@ -149,7 +149,7 @@ use crate::bindings::{dentry, inode};
 fn try_read_kernel_str_bytes(src: *const u8, buf: &mut [u8]) -> Result<usize, i64> {
     if buf.is_empty() { return Err(1); } // EINVAL
     match unsafe { bpf_probe_read_kernel_str_bytes(src, buf) } {
-        Ok(_) => { // On success, find the length from the buffer.
+        Ok(_) => { // If Ok, success means buf is populated. Find length from null terminator.
             Ok(buf.iter().position(|&byte| byte == 0).unwrap_or(buf.len()))
         }
         Err(e) => Err(e as i64),
@@ -303,8 +303,8 @@ use aya_ebpf::programs::ProbeContext;
 #[inline] fn should_skip_kprobe(monitor_type: u32) -> bool { (unsafe { MONITOR } & monitor_type) == 0 }
 static mut DENTRY_SYMLINK_TEMP: *const bindings::dentry = core::ptr::null_mut();
 
-#[kretprobe(name="do_filp_open")]
-pub fn kretprobe_do_filp_open(ctx: ProbeContext) -> u32 {
+#[kretprobe(section="kretprobe/do_filp_open")]
+pub fn do_filp_open(ctx: ProbeContext) -> u32 {
     match try_do_filp_open(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 
@@ -324,8 +324,8 @@ fn try_do_filp_open(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe(name="security_inode_link")]
-pub fn kprobe_security_inode_link(ctx: ProbeContext) -> u32 {
+#[kprobe(section="kprobe/security_inode_link")]
+pub fn security_inode_link(ctx: ProbeContext) -> u32 {
     match try_security_inode_link(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_security_inode_link(ctx: ProbeContext) -> Result<u32, i64> {
@@ -340,8 +340,8 @@ fn try_security_inode_link(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_info)?; Ok(0)
 }
 
-#[kprobe(name="security_inode_symlink")]
-pub fn kprobe_security_inode_symlink(ctx: ProbeContext) -> u32 {
+#[kprobe(section="kprobe/security_inode_symlink")]
+pub fn security_inode_symlink(ctx: ProbeContext) -> u32 {
     match try_security_inode_symlink(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_security_inode_symlink(ctx: ProbeContext) -> Result<u32, i64> {
@@ -350,8 +350,8 @@ fn try_security_inode_symlink(ctx: ProbeContext) -> Result<u32, i64> {
     unsafe { DENTRY_SYMLINK_TEMP = dentry_ptr_arg }; Ok(0)
 }
 
-#[kprobe(name="dput")]
-pub fn kprobe_dput(ctx: ProbeContext) -> u32 {
+#[kprobe(section="kprobe/dput")]
+pub fn dput(ctx: ProbeContext) -> u32 {
     match try_dput(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_dput(ctx: ProbeContext) -> Result<u32, i64> {
@@ -369,8 +369,8 @@ fn try_dput(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_info)?; Ok(0)
 }
 
-#[kprobe(name="notify_change")]
-pub fn kprobe_notify_change(ctx: ProbeContext) -> u32 {
+#[kprobe(section="kprobe/notify_change")]
+pub fn notify_change(ctx: ProbeContext) -> u32 {
     match try_notify_change(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_notify_change(ctx: ProbeContext) -> Result<u32, i64> {
@@ -398,8 +398,8 @@ fn try_notify_change(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe(name="__fsnotify_parent")]
-pub fn kprobe___fsnotify_parent(ctx: ProbeContext) -> u32 {
+#[kprobe(section="kprobe/__fsnotify_parent")]
+pub fn __fsnotify_parent(ctx: ProbeContext) -> u32 {
     match try___fsnotify_parent(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try___fsnotify_parent(ctx: ProbeContext) -> Result<u32, i64> {
@@ -421,8 +421,8 @@ fn try___fsnotify_parent(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-#[kprobe(name="security_inode_rename")]
-pub fn kprobe_security_inode_rename(ctx: ProbeContext) -> u32 {
+#[kprobe(section="kprobe/security_inode_rename")]
+pub fn security_inode_rename(ctx: ProbeContext) -> u32 {
     match try_security_inode_rename(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_security_inode_rename(ctx: ProbeContext) -> Result<u32, i64> {
@@ -438,8 +438,8 @@ fn try_security_inode_rename(ctx: ProbeContext) -> Result<u32, i64> {
     handle_fs_event(&event_to)?; Ok(0)
 }
 
-#[kprobe(name="security_inode_unlink")]
-pub fn kprobe_security_inode_unlink(ctx: ProbeContext) -> u32 {
+#[kprobe(section="kprobe/security_inode_unlink")]
+pub fn security_inode_unlink(ctx: ProbeContext) -> u32 {
     match try_security_inode_unlink(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
 fn try_security_inode_unlink(ctx: ProbeContext) -> Result<u32, i64> {
