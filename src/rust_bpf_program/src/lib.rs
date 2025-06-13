@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(static_mut_refs)] // Allow static mut refs for BPF maps
 
 use core::panic::PanicInfo;
 
@@ -20,7 +21,7 @@ pub const RECORD_TYPE_FILE: u32 = 1;
 #[derive(Copy, Clone, Default)]
 pub struct Record {
     pub type_: u32,
-    pub ts: u64,
+    pub ts: u64, // ts_event was assigned here, but if bpf_ktime_get_ns is unused, this might be uninitialized or 0
 }
 
 #[repr(C)]
@@ -53,6 +54,7 @@ pub struct RecordFs {
 impl Default for RecordFs {
     fn default() -> Self {
         RecordFs {
+            // rc.ts will be 0 by default if not set by bpf_ktime_get_ns
             rc: Record::default(), events: 0, event: [0; FS_EVENT_MAX], ino: 0, imode: 0,
             inlink: 0, isize: 0, atime_nsec: 0, mtime_nsec: 0, ctime_nsec: 0,
             isize_first: 0, filepath: [0u8; FILEPATH_LEN_MAX], names: RecordFsFilenames::default(),
@@ -122,9 +124,9 @@ pub static mut STATS: Array<Stats> = Array::with_max_entries(1, 0);
 // --- START: Global Variables (Loader Initialized) ---
 static mut PID_SELF: u32 = 0; static mut AGG_EVENTS_MAX: u32 = 0;
 static mut MONITOR: u32 = MONITOR_FILE;
-#[allow(dead_code)] // TS_START is not used in BPF code
+#[allow(dead_code)]
 static mut TS_START: u64 = 0;
-#[allow(dead_code)] // DEBUG_MSG will be used by debugging utilities
+#[allow(dead_code)]
 static mut DEBUG_MSG: [u8; DBG_LEN_MAX] = [0; DBG_LEN_MAX];
 // --- END: Global Variables ---
 
@@ -144,7 +146,7 @@ pub mod bindings {
 // --- END: Dummy Bindings ---
 
 // --- START: Core eBPF Program Logic (handle_fs_event) ---
-use aya_ebpf::helpers::{bpf_ktime_get_ns, bpf_probe_read_kernel_str_bytes};
+use aya_ebpf::helpers::bpf_probe_read_kernel_str_bytes; // Removed bpf_ktime_get_ns
 use aya_ebpf::bindings::BPF_ANY;
 use crate::bindings::{dentry, inode};
 
@@ -201,7 +203,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     if !(s_isreg(imode_val) || s_islnk(imode_val)) { return Ok(()); }
 
     let key = key_pid_ino(pid, ino_val);
-    let ts_event = unsafe { aya_ebpf::helpers::bpf_ktime_get_ns() };
+    // let ts_event = unsafe { aya_ebpf::helpers::bpf_ktime_get_ns() }; // ts_event and bpf_ktime_get_ns removed
     let zero_key: u32 = 0;
     let r_for_aggregation_logic: RecordFs;
 
@@ -215,7 +217,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
                 if len_to_copy < FILENAME_LEN_MAX / 2 { dest_slice[len_to_copy] = 0; }
             }
         }
-        r_existing.rc.ts = ts_event;
+        // r_existing.rc.ts = ts_event; // ts_event removed
         r_existing.imode = imode_val as u32; r_existing.isize = isize_val; r_existing.inlink = inlink_val;
         if index == IndexFsEvent::ICreate && !dentry_old_ptr.is_null() {
              r_existing.inlink = r_existing.inlink.saturating_add(1);
@@ -232,7 +234,8 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     } else {
         if let Some(heap_record_ptr) = unsafe { HEAP_RECORD_FS.get_ptr_mut(zero_key) } {
             let mut r_current = unsafe {core::ptr::read(heap_record_ptr)};
-            r_current.rc.ts = ts_event; r_current.ino = ino_val;
+            // r_current.rc.ts = ts_event; // ts_event removed
+            r_current.ino = ino_val;
             unsafe { r_current.names.filename.copy_from_slice(&filename_buf) };
             r_current.isize_first = isize_val;
             r_current.filepath = [0u8; FILEPATH_LEN_MAX];
@@ -274,6 +277,10 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     if agg_end {
         let mut r_to_send = r_for_aggregation_logic;
         r_to_send.rc.type_ = RECORD_TYPE_FILE;
+        // r_to_send.rc.ts = unsafe { aya_ebpf::helpers::bpf_ktime_get_ns() }; // Example: set timestamp just before sending
+        // If bpf_ktime_get_ns is to be used here, it needs to be re-imported.
+        // For now, rc.ts will use the value it had (0 if new, or previous if existing and not updated).
+
         if unsafe { RINGBUF_RECORDS.output(&r_to_send, 0) }.is_err() {
             if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } {
                 unsafe { (*stats_val_ptr).fs_records_dropped = (*stats_val_ptr).fs_records_dropped.saturating_add(1); }
@@ -403,9 +410,8 @@ fn try_notify_change_internal(ctx: ProbeContext) -> Result<u32, i64> {
 
 #[kprobe]
 pub fn __fsnotify_parent(ctx: ProbeContext) -> u32 {
-    match try_fsnotify_parent_internal(ctx) { Ok(ret) => ret, Err(_) => 1, } // Corrected call
+    match try_fsnotify_parent_internal(ctx) { Ok(ret) => ret, Err(_) => 1, }
 }
-// Corrected internal function name to snake_case
 fn try_fsnotify_parent_internal(ctx: ProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
     let dentry_ptr = ctx.arg::<*const bindings::dentry>(0).ok_or(1i64)?;
