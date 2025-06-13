@@ -144,7 +144,7 @@ pub mod bindings {
 // --- END: Dummy Bindings ---
 
 // --- START: Core eBPF Program Logic (handle_fs_event) ---
-use aya_ebpf::helpers::{bpf_ktime_get_ns, bpf_probe_read_kernel_str_bytes};
+use aya_ebpf::helpers::{bpf_probe_read_kernel_str_bytes};
 use aya_ebpf::bindings::BPF_ANY;
 use crate::bindings::{dentry, inode};
 
@@ -313,7 +313,7 @@ pub fn do_filp_open(ctx: RetProbeContext) -> u32 {
 
 fn try_do_filp_open_internal(ctx: RetProbeContext) -> Result<u32, i64> {
     if should_skip_kprobe(MONITOR_FILE) { return Ok(0); }
-    let filp_ptr = ctx.read_return_value::<*const bindings::file>()?;
+    let filp_ptr: *const bindings::file = ctx.ret().ok_or(1i64)?;
     if filp_ptr.is_null() { return Ok(0); }
     let f_mode_val: u32 = 0;
     let f_path_dentry_ptr: *const bindings::dentry = core::ptr::null();
