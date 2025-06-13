@@ -23,3 +23,9 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "dirt-ebpf-loader" # Placeholder for a potential loader, not the bpf program itself
 path = "src/main.rs" # Assuming a loader would live in src/main.rs relative to this Cargo.toml
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
