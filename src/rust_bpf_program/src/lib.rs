@@ -8,9 +8,13 @@ fn panic(_info: &PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
 
-use aya_ebpf_macros::{map, kprobe, kretprobe, info, trace, debug}; // Added logging macros
+use aya_ebpf_macros::{map, kprobe, kretprobe};
 use aya_ebpf::cty;
-use aya_ebpf::helpers::bpf_get_stack; // For debug_dump_stack
+use aya_ebpf::EbpfContext as _; // Import trait for as_ptr()
+
+// Logging macros from aya_log_ebpf
+use aya_log_ebpf::{info, trace, debug};
+
 
 // --- START: Translated from dirt.h ---
 pub const FILENAME_LEN_MAX: usize = 32;
@@ -104,7 +108,7 @@ const S_IFMT: u16 = 0o0170000; const S_IFLNK: u16 = 0o0120000; const S_IFREG: u1
 #[inline] pub fn s_isreg(mode: u16) -> bool { (mode & S_IFMT) == S_IFREG }
 #[inline] pub fn key_pid_ino(pid: u32, ino: u32) -> u64 { ((pid as u64) << 32) | (ino as u64) }
 
-pub const DBG_LEN_MAX: usize = 16; pub const MAX_STACK_TRACE_DEPTH: usize = 16;
+pub const DBG_LEN_MAX: usize = 16; pub const MAX_STACK_TRACE_DEPTH: usize = 16; // Used by debug utils
 pub const DNAME_INLINE_LEN: usize = 32; pub const FILEPATH_NODE_MAX: usize = 16;
 // --- END: Translated from dirt.h ---
 
@@ -143,12 +147,12 @@ pub mod bindings {
         pub cs: u64, pub eflags: u64, pub rsp: u64, pub ss: u64,
     }
     // Added for debug_dump_stack
-    #[repr(C)]
-    pub struct bpf_stack_build_id {
-        pub status: u32,
-        pub offset: u32,
-        pub build_id: [u8; 20], // BUILD_ID_SIZE_MAX from include/uapi/linux/bpf.h
-    }
+    // #[repr(C)]
+    // pub struct bpf_stack_build_id {
+    //     pub status: u32,
+    //     pub offset: u32,
+    //     pub build_id: [u8; 20], // BUILD_ID_SIZE_MAX from include/uapi/linux/bpf.h
+    // }
 
 }
 // --- END: Dummy Bindings ---
@@ -211,6 +215,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     if !(s_isreg(imode_val) || s_islnk(imode_val)) { return Ok(()); }
 
     let key = key_pid_ino(pid, ino_val);
+    // ts_event and bpf_ktime_get_ns usage removed. Timestamps in records will be 0 or from loader.
     let zero_key: u32 = 0;
     let r_for_aggregation_logic: RecordFs;
 
@@ -224,7 +229,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
                 if len_to_copy < FILENAME_LEN_MAX / 2 { dest_slice[len_to_copy] = 0; }
             }
         }
-        // r_existing.rc.ts = ts_event; // ts_event removed
+        // r_existing.rc.ts not updated with current time here
         r_existing.imode = imode_val as u32; r_existing.isize = isize_val; r_existing.inlink = inlink_val;
         if index == IndexFsEvent::ICreate && !dentry_old_ptr.is_null() {
              r_existing.inlink = r_existing.inlink.saturating_add(1);
@@ -241,7 +246,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     } else {
         if let Some(heap_record_ptr) = unsafe { HEAP_RECORD_FS.get_ptr_mut(zero_key) } {
             let mut r_current = unsafe {core::ptr::read(heap_record_ptr)};
-            // r_current.rc.ts = ts_event; // ts_event removed
+            // r_current.rc.ts not updated with current time here
             r_current.ino = ino_val;
             unsafe { r_current.names.filename.copy_from_slice(&filename_buf) };
             r_current.isize_first = isize_val;
@@ -284,6 +289,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     if agg_end {
         let mut r_to_send = r_for_aggregation_logic;
         r_to_send.rc.type_ = RECORD_TYPE_FILE;
+        // r_to_send.rc.ts = unsafe { aya_ebpf::helpers::bpf_ktime_get_ns() }; // If timestamp needed just before send
         if unsafe { RINGBUF_RECORDS.output(&r_to_send, 0) }.is_err() {
             if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } {
                 unsafe { (*stats_val_ptr).fs_records_dropped = (*stats_val_ptr).fs_records_dropped.saturating_add(1); }
@@ -311,135 +317,79 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
 // --- END: Core eBPF Program Logic (handle_fs_event) ---
 
 // --- START: Debugging Utilities ---
-#[allow(dead_code)] // May be unused depending on final build
-fn debug_file_is_tp(ctx: ProbeContext) -> u32 {
-    let filename_ptr = ctx.arg::<*const cty::c_char>(0).unwrap_or(core::ptr::null());
-    if filename_ptr.is_null() {
-        debug!(ctx, "debug_file_is_tp: filename_ptr is NULL");
-        return 0;
-    }
-    let mut buf = [0u8; 64]; // Increased buffer size for safety
-    let read_len = match try_read_kernel_str_bytes(filename_ptr as *const u8, &mut buf) {
-        Ok(len) => len,
-        Err(e) => {
-            debug!(ctx, "debug_file_is_tp: read_kernel_str_bytes failed: {}", e);
-            return 0;
-        }
+use aya_ebpf::helpers::bpf_get_stack; // Already imported at the top
+
+// Buffer for bpf_get_stack.
+// Using a PerCpuArray might be safer if this can be called concurrently,
+// but for simple debug utility, static mut with understanding of limitations.
+static mut DEBUG_STACK_BUF: [u64; MAX_STACK_TRACE_DEPTH] = [0; MAX_STACK_TRACE_DEPTH];
+
+#[allow(dead_code)]
+fn debug_dump_stack(ctx: ProbeContext, func_name_for_log: &str) {
+    let kstacklen = unsafe {
+        bpf_get_stack( // Removed aya_ebpf::helpers:: prefix as it's in scope
+            ctx.as_ptr(),
+            DEBUG_STACK_BUF.as_mut_ptr() as *mut cty::c_void,
+            (MAX_STACK_TRACE_DEPTH * core::mem::size_of::<u64>()) as u32,
+            0,
+        )
     };
-    if read_len == 0 || read_len >= buf.len() { // Check if read was empty or potentially truncated
-        debug!(ctx, "debug_file_is_tp: read_len invalid {} or too long for buffer", read_len);
-        return 0;
-    }
 
-    // Simple check if "trace_pipe" is in the filename
-    let trace_pipe_bytes = b"trace_pipe";
-    if buf[..read_len].windows(trace_pipe_bytes.len()).any(|window| window == trace_pipe_bytes) {
-        debug!(ctx, "debug_file_is_tp: Found trace_pipe in filename");
-        return 1;
-    }
-    0
-}
-
-#[allow(dead_code)] // May be unused depending on final build
-fn debug_proc(ctx: ProbeContext, msg_prefix: &str, value: u64) {
-    let pid_tgid = aya_ebpf::helpers::bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-    let comm_ptr = aya_ebpf::helpers::bpf_get_current_comm().unwrap_or([0u8; 16].as_ptr() as *const u8);
-
-    let mut comm_buf = [0u8; 16];
-    let _ = try_read_kernel_str_bytes(comm_ptr, &mut comm_buf); // Ignore error for simplicity in debug
-
-    // Format into DEBUG_MSG
-    // This is a very basic formatting, real snprintf is not available.
-    // Example: "prefix: value pid: X comm: YYY"
-    // For simplicity, we'll just log the prefix and value.
-    // A more robust solution would involve a ring buffer for debug messages.
-    let mut cursor = 0;
-    for byte in msg_prefix.as_bytes().iter() {
-        if cursor < DBG_LEN_MAX -1 { unsafe { DEBUG_MSG[cursor] = *byte; } cursor += 1; } else { break; }
-    }
-    // Add a space or delimiter if there's room
-    if cursor < DBG_LEN_MAX -1 { unsafe { DEBUG_MSG[cursor] = b':'; } cursor += 1; }
-    if cursor < DBG_LEN_MAX -1 { unsafe { DEBUG_MSG[cursor] = b' '; } cursor += 1; }
-
-    // Naive u64 to_ascii (limited length for simplicity)
-    let mut temp_val = value;
-    let start_cursor = cursor;
-    if temp_val == 0 && cursor < DBG_LEN_MAX - 1 {
-        unsafe { DEBUG_MSG[cursor] = b'0'; } cursor += 1;
+    if kstacklen > 0 {
+        info!(&ctx, "KERNEL STACK ({} bytes) for {}:", // Corrected format string
+            kstacklen,
+            func_name_for_log
+        );
+        let num_frames = kstacklen as usize / core::mem::size_of::<u64>();
+        for i in 0..num_frames {
+            if i < MAX_STACK_TRACE_DEPTH {
+                info!(&ctx, "  #{} 0x{:x}", i, unsafe { DEBUG_STACK_BUF[i] });
+            } else {
+                break;
+            }
+        }
     } else {
-        while temp_val > 0 && cursor < DBG_LEN_MAX - 1 {
-            unsafe { DEBUG_MSG[cursor] = (temp_val % 10) as u8 + b'0'; }
-            temp_val /= 10;
-            cursor += 1;
-        }
-        // Reverse the number string
-        let end_cursor = cursor;
-        let mut i = start_cursor;
-        let mut j = end_cursor -1;
-        while i < j {
-            unsafe { DEBUG_MSG.swap(i,j); }
-            i += 1; j -=1;
-        }
+        info!(&ctx, "debug_dump_stack for {}: bpf_get_stack error or empty: {}", func_name_for_log, kstacklen);
     }
-    if cursor < DBG_LEN_MAX { unsafe { DEBUG_MSG[cursor] = 0; } } else { unsafe { DEBUG_MSG[DBG_LEN_MAX-1] = 0; } }
-
-    // Using info! macro which relies on aya-log-ebpf setup (e.g. bpf_printk)
-    // The content of DEBUG_MSG might not be directly usable by info! if it expects format strings.
-    // For a direct printk-like behavior, one would typically use a helper that formats and pushes to ring buffer
-    // or directly uses bpf_trace_printk if available and appropriate (not recommended for high-frequency).
-    // For this example, let's assume info! can take a byte slice or we use a simpler approach.
-    // aya_log_ebpf::info!(ctx, "pid:{} comm:{} {}: {}", pid, &comm_buf[..], msg_prefix, value);
-    // Since DEBUG_MSG is now populated, we could try to send it.
-    // However, aya_log_ebpf macros expect format string literals.
-    // A simple log for now:
-    info!(ctx, "DEBUG: pid:{} value:{}", pid, value);
 }
 
+#[allow(dead_code)]
+fn debug_file_is_tp(filename_bytes: &[u8]) -> bool {
+    const TRACE_PIPE_NAME: &[u8] = b"trace_pipe";
+    let len = filename_bytes.iter().position(|&b| b == 0).unwrap_or(filename_bytes.len());
+    let name_slice = &filename_bytes[..len];
+    name_slice == TRACE_PIPE_NAME
+}
 
-#[allow(dead_code)] // May be unused depending on final build
-fn debug_dump_stack(ctx: ProbeContext) {
-    const STACK_BUF_SIZE: usize = MAX_STACK_TRACE_DEPTH * core::mem::size_of::<u64>();
-    let mut stack_buf = [0u8; STACK_BUF_SIZE];
-    let mut build_id_buf = [0u8; core::mem::size_of::<bindings::bpf_stack_build_id>()];
-
-    let stack_len = match unsafe { bpf_get_stack(ctx.as_ptr(), &mut stack_buf, STACK_BUF_SIZE as u32, 0) } {
-        Ok(len) => len,
-        Err(e) => {
-            info!(ctx, "Failed to get stack: {}", e);
-            return;
-        }
+#[allow(dead_code)]
+fn debug_proc(_ctx: ProbeContext, filename_bytes: &[u8]) -> bool { // _ctx marked unused if not needed
+    let comm_array = match aya_ebpf::helpers::bpf_get_current_comm() {
+        Ok(comm) => comm,
+        Err(_) => return true,
     };
+    let comm_len = comm_array.iter().position(|&b| b == 0).unwrap_or(comm_array.len());
+    let comm_slice = &comm_array[..comm_len];
 
-    if stack_len == 0 {
-        info!(ctx, "Stack trace empty.");
-        return;
+    let debug_filter_full = unsafe { &DEBUG_MSG[..] };
+    let debug_filter_len = debug_filter_full.iter().position(|&b| b == 0).unwrap_or(DBG_LEN_MAX);
+    let debug_filter = &debug_filter_full[..debug_filter_len];
+
+    if comm_slice.is_empty() {
+        return debug_filter == b"q";
     }
 
-    info!(ctx, "Stack trace ({} bytes):", stack_len);
-    // Iterate over stack addresses (assuming u64 addresses)
-    let mut i = 0;
-    while i < stack_len as usize && i < STACK_BUF_SIZE {
-        if STACK_BUF_SIZE - i < core::mem::size_of::<u64>() { break; }
-        let addr = u64::from_ne_bytes(stack_buf[i..i+core::mem::size_of::<u64>()].try_into().unwrap_or_default());
-        info!(ctx, "  ip: {:#x}", addr);
-
-        // Try to get build ID and offset for this address
-        // This is a simplified version, as bpf_get_stack_build_id is not directly available in aya_ebpf::helpers
-        // A real implementation would need to call the helper appropriately.
-        // For now, just print the raw address.
-        // Example of how one might use bpf_stack_build_id if available:
-        // let build_id_ptr = build_id_buf.as_mut_ptr() as *mut bindings::bpf_stack_build_id;
-        // if unsafe { bpf_get_stack_build_id_helper(ctx.as_ptr(), addr, build_id_ptr) } == 0 {
-        //    let build_id_info = unsafe { &*build_id_ptr };
-        //    info!(ctx, "    build_id: {:x?}, offset: {:#x}", &build_id_info.build_id[..], build_id_info.offset);
-        // }
-        i += core::mem::size_of::<u64>();
+    if !debug_filter.is_empty() && debug_filter[0] != b'*' {
+        if !comm_slice.starts_with(debug_filter) {
+            return false;
+        }
     }
+
+    if debug_file_is_tp(filename_bytes) {
+        return false;
+    }
+    true
 }
-
 // --- END: Debugging Utilities ---
-
 
 // --- START: Kprobe Definitions ---
 use aya_ebpf::programs::{ProbeContext, RetProbeContext};
