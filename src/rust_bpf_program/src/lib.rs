@@ -10,10 +10,10 @@ fn panic(_info: &PanicInfo) -> ! {
 
 use aya_ebpf_macros::{map, kprobe, kretprobe};
 use aya_ebpf::cty;
-use aya_ebpf::EbpfContext as _; // Import trait for as_ptr()
+use aya_ebpf::EbpfContext as _;
 
-// Logging macros from aya_log_ebpf
-use aya_log_ebpf::{info, trace, debug};
+// Logging macros from aya_log_ebpf - only importing 'info' as 'trace' and 'debug' were unused.
+use aya_log_ebpf::info;
 
 
 // --- START: Translated from dirt.h ---
@@ -108,7 +108,7 @@ const S_IFMT: u16 = 0o0170000; const S_IFLNK: u16 = 0o0120000; const S_IFREG: u1
 #[inline] pub fn s_isreg(mode: u16) -> bool { (mode & S_IFMT) == S_IFREG }
 #[inline] pub fn key_pid_ino(pid: u32, ino: u32) -> u64 { ((pid as u64) << 32) | (ino as u64) }
 
-pub const DBG_LEN_MAX: usize = 16; pub const MAX_STACK_TRACE_DEPTH: usize = 16; // Used by debug utils
+pub const DBG_LEN_MAX: usize = 16; pub const MAX_STACK_TRACE_DEPTH: usize = 16;
 pub const DNAME_INLINE_LEN: usize = 32; pub const FILEPATH_NODE_MAX: usize = 16;
 // --- END: Translated from dirt.h ---
 
@@ -130,8 +130,7 @@ static mut PID_SELF: u32 = 0; static mut AGG_EVENTS_MAX: u32 = 0;
 static mut MONITOR: u32 = MONITOR_FILE;
 #[allow(dead_code)]
 static mut TS_START: u64 = 0;
-// DEBUG_MSG is now used by debug_proc
-static mut DEBUG_MSG: [u8; DBG_LEN_MAX] = [0; DBG_LEN_MAX];
+static mut DEBUG_MSG: [u8; DBG_LEN_MAX] = [0; DBG_LEN_MAX]; // Used by debug_proc
 // --- END: Global Variables ---
 
 // --- START: Dummy Bindings (Temporary for handle_fs_event structure) ---
@@ -146,14 +145,6 @@ pub mod bindings {
         pub rdx: u64, pub rsi: u64, pub rdi: u64, pub orig_rax: u64, pub rip: u64,
         pub cs: u64, pub eflags: u64, pub rsp: u64, pub ss: u64,
     }
-    // Added for debug_dump_stack
-    // #[repr(C)]
-    // pub struct bpf_stack_build_id {
-    //     pub status: u32,
-    //     pub offset: u32,
-    //     pub build_id: [u8; 20], // BUILD_ID_SIZE_MAX from include/uapi/linux/bpf.h
-    // }
-
 }
 // --- END: Dummy Bindings ---
 
@@ -215,7 +206,6 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     if !(s_isreg(imode_val) || s_islnk(imode_val)) { return Ok(()); }
 
     let key = key_pid_ino(pid, ino_val);
-    // ts_event and bpf_ktime_get_ns usage removed. Timestamps in records will be 0 or from loader.
     let zero_key: u32 = 0;
     let r_for_aggregation_logic: RecordFs;
 
@@ -229,7 +219,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
                 if len_to_copy < FILENAME_LEN_MAX / 2 { dest_slice[len_to_copy] = 0; }
             }
         }
-        // r_existing.rc.ts not updated with current time here
+        // r_existing.rc.ts not updated with current time
         r_existing.imode = imode_val as u32; r_existing.isize = isize_val; r_existing.inlink = inlink_val;
         if index == IndexFsEvent::ICreate && !dentry_old_ptr.is_null() {
              r_existing.inlink = r_existing.inlink.saturating_add(1);
@@ -246,7 +236,7 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     } else {
         if let Some(heap_record_ptr) = unsafe { HEAP_RECORD_FS.get_ptr_mut(zero_key) } {
             let mut r_current = unsafe {core::ptr::read(heap_record_ptr)};
-            // r_current.rc.ts not updated with current time here
+            // r_current.rc.ts not updated with current time
             r_current.ino = ino_val;
             unsafe { r_current.names.filename.copy_from_slice(&filename_buf) };
             r_current.isize_first = isize_val;
@@ -289,7 +279,6 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     if agg_end {
         let mut r_to_send = r_for_aggregation_logic;
         r_to_send.rc.type_ = RECORD_TYPE_FILE;
-        // r_to_send.rc.ts = unsafe { aya_ebpf::helpers::bpf_ktime_get_ns() }; // If timestamp needed just before send
         if unsafe { RINGBUF_RECORDS.output(&r_to_send, 0) }.is_err() {
             if let Some(stats_val_ptr) = unsafe { STATS.get_ptr_mut(zero_key) } {
                 unsafe { (*stats_val_ptr).fs_records_dropped = (*stats_val_ptr).fs_records_dropped.saturating_add(1); }
@@ -315,81 +304,6 @@ fn handle_fs_event(event_info: &FsEventInfo) -> Result<(), i64> {
     Ok(())
 }
 // --- END: Core eBPF Program Logic (handle_fs_event) ---
-
-// --- START: Debugging Utilities ---
-use aya_ebpf::helpers::bpf_get_stack; // Already imported at the top
-
-// Buffer for bpf_get_stack.
-// Using a PerCpuArray might be safer if this can be called concurrently,
-// but for simple debug utility, static mut with understanding of limitations.
-static mut DEBUG_STACK_BUF: [u64; MAX_STACK_TRACE_DEPTH] = [0; MAX_STACK_TRACE_DEPTH];
-
-#[allow(dead_code)]
-fn debug_dump_stack(ctx: ProbeContext, func_name_for_log: &str) {
-    let kstacklen = unsafe {
-        bpf_get_stack( // Removed aya_ebpf::helpers:: prefix as it's in scope
-            ctx.as_ptr(),
-            DEBUG_STACK_BUF.as_mut_ptr() as *mut cty::c_void,
-            (MAX_STACK_TRACE_DEPTH * core::mem::size_of::<u64>()) as u32,
-            0,
-        )
-    };
-
-    if kstacklen > 0 {
-        info!(&ctx, "KERNEL STACK ({} bytes) for {}:", // Corrected format string
-            kstacklen,
-            func_name_for_log
-        );
-        let num_frames = kstacklen as usize / core::mem::size_of::<u64>();
-        for i in 0..num_frames {
-            if i < MAX_STACK_TRACE_DEPTH {
-                info!(&ctx, "  #{} 0x{:x}", i, unsafe { DEBUG_STACK_BUF[i] });
-            } else {
-                break;
-            }
-        }
-    } else {
-        info!(&ctx, "debug_dump_stack for {}: bpf_get_stack error or empty: {}", func_name_for_log, kstacklen);
-    }
-}
-
-#[allow(dead_code)]
-fn debug_file_is_tp(filename_bytes: &[u8]) -> bool {
-    const TRACE_PIPE_NAME: &[u8] = b"trace_pipe";
-    let len = filename_bytes.iter().position(|&b| b == 0).unwrap_or(filename_bytes.len());
-    let name_slice = &filename_bytes[..len];
-    name_slice == TRACE_PIPE_NAME
-}
-
-#[allow(dead_code)]
-fn debug_proc(_ctx: ProbeContext, filename_bytes: &[u8]) -> bool { // _ctx marked unused if not needed
-    let comm_array = match aya_ebpf::helpers::bpf_get_current_comm() {
-        Ok(comm) => comm,
-        Err(_) => return true,
-    };
-    let comm_len = comm_array.iter().position(|&b| b == 0).unwrap_or(comm_array.len());
-    let comm_slice = &comm_array[..comm_len];
-
-    let debug_filter_full = unsafe { &DEBUG_MSG[..] };
-    let debug_filter_len = debug_filter_full.iter().position(|&b| b == 0).unwrap_or(DBG_LEN_MAX);
-    let debug_filter = &debug_filter_full[..debug_filter_len];
-
-    if comm_slice.is_empty() {
-        return debug_filter == b"q";
-    }
-
-    if !debug_filter.is_empty() && debug_filter[0] != b'*' {
-        if !comm_slice.starts_with(debug_filter) {
-            return false;
-        }
-    }
-
-    if debug_file_is_tp(filename_bytes) {
-        return false;
-    }
-    true
-}
-// --- END: Debugging Utilities ---
 
 // --- START: Kprobe Definitions ---
 use aya_ebpf::programs::{ProbeContext, RetProbeContext};
@@ -544,10 +458,83 @@ fn try_security_inode_unlink_internal(ctx: ProbeContext) -> Result<u32, i64> {
 }
 // --- END: Kprobe Definitions ---
 
+// --- START: Debugging Utilities ---
+use aya_ebpf::helpers::bpf_get_stack; // Already imported at top of kprobe section
+
+static mut DEBUG_STACK_BUF: [u64; MAX_STACK_TRACE_DEPTH] = [0; MAX_STACK_TRACE_DEPTH];
+
+#[allow(dead_code)]
+fn debug_dump_stack<C: aya_ebpf::BpfContext>(ctx: &C, func_name_for_log: &str) { // Context type is generic
+    let kstacklen = unsafe {
+        bpf_get_stack(
+            ctx.as_ptr(),
+            DEBUG_STACK_BUF.as_mut_ptr() as *mut cty::c_void,
+            (MAX_STACK_TRACE_DEPTH * core::mem::size_of::<u64>()) as u32,
+            0,
+        )
+    };
+
+    if kstacklen > 0 {
+        info!(ctx, "KERNEL STACK ({} bytes) for {}:",
+            kstacklen,
+            func_name_for_log
+        );
+        let num_frames = kstacklen as usize / core::mem::size_of::<u64>();
+        for i in 0..num_frames {
+            if i < MAX_STACK_TRACE_DEPTH {
+                info!(ctx, "  #{} 0x{:x}", i, unsafe { DEBUG_STACK_BUF[i] });
+            } else {
+                break;
+            }
+        }
+    } else {
+        info!(ctx, "debug_dump_stack for {}: bpf_get_stack error or empty: {}", func_name_for_log, kstacklen);
+    }
+}
+
+#[allow(dead_code)]
+fn debug_file_is_tp(filename_bytes: &[u8]) -> bool {
+    const TRACE_PIPE_NAME: &[u8] = b"trace_pipe";
+    let len = filename_bytes.iter().position(|&b| b == 0).unwrap_or(filename_bytes.len());
+    let name_slice = &filename_bytes[..len];
+    name_slice == TRACE_PIPE_NAME
+}
+
+#[allow(dead_code)]
+fn debug_proc<C: aya_ebpf::BpfContext>(ctx: &C, filename_bytes: &[u8]) -> bool { // Context type is generic
+    let comm_array = match aya_ebpf::helpers::bpf_get_current_comm() {
+        Ok(comm) => comm,
+        Err(_) => return true,
+    };
+    let comm_len = comm_array.iter().position(|&b| b == 0).unwrap_or(comm_array.len());
+    let comm_slice = &comm_array[..comm_len];
+
+    let debug_filter_full = unsafe { &DEBUG_MSG[..] };
+    let debug_filter_len = debug_filter_full.iter().position(|&b| b == 0).unwrap_or(DBG_LEN_MAX);
+    let debug_filter = &debug_filter_full[..debug_filter_len];
+
+    if comm_slice.is_empty() {
+        return debug_filter == b"q";
+    }
+
+    if !debug_filter.is_empty() && debug_filter[0] != b'*' {
+        if !comm_slice.starts_with(debug_filter) {
+            return false;
+        }
+    }
+
+    if debug_file_is_tp(filename_bytes) {
+        return false;
+    }
+    true
+}
+// --- END: Debugging Utilities ---
+
 // Example of how aya-gen might be invoked (as a comment, not executed):
 // aya-gen generate --header vmlinux/x86/vmlinux.h --target-arch x86_64 > src/bindings.rs
 // Or, if BTF is available on the system:
-// aya-gen generate --btf /sys/kernel/btf/vmlinux > src/bindings.rs
+// aya_gen generate --btf /sys/kernel/btf/vmlinux > src/bindings.rs
+
 
 #[allow(dead_code)]
 fn placeholder_bpf_func() {}
