@@ -541,5 +541,3 @@ fn debug_proc<C: aya_ebpf::EbpfContext>(ctx: &C, filename_bytes: &[u8]) -> bool 
 
 #[allow(dead_code)]
 fn placeholder_bpf_func() {}
-
-```
