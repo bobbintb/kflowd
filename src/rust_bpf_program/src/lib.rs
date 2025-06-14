@@ -10,10 +10,10 @@ fn panic(_info: &PanicInfo) -> ! {
 
 use aya_ebpf_macros::{map, kprobe, kretprobe};
 use aya_ebpf::cty;
-use aya_ebpf::EbpfContext as _;
+use aya_ebpf::EbpfContext as _; // Import trait for as_ptr() and other context methods
 
-// Logging macros from aya_log_ebpf - only importing 'info' as 'trace' and 'debug' were unused.
-use aya_log_ebpf::info;
+// Logging macros from aya_log_ebpf
+use aya_log_ebpf::{info, trace}; // Added trace back
 
 
 // --- START: Translated from dirt.h ---
@@ -130,7 +130,7 @@ static mut PID_SELF: u32 = 0; static mut AGG_EVENTS_MAX: u32 = 0;
 static mut MONITOR: u32 = MONITOR_FILE;
 #[allow(dead_code)]
 static mut TS_START: u64 = 0;
-static mut DEBUG_MSG: [u8; DBG_LEN_MAX] = [0; DBG_LEN_MAX]; // Used by debug_proc
+static mut DEBUG_MSG: [u8; DBG_LEN_MAX] = [0; DBG_LEN_MAX];
 // --- END: Global Variables ---
 
 // --- START: Dummy Bindings (Temporary for handle_fs_event structure) ---
@@ -459,12 +459,12 @@ fn try_security_inode_unlink_internal(ctx: ProbeContext) -> Result<u32, i64> {
 // --- END: Kprobe Definitions ---
 
 // --- START: Debugging Utilities ---
-use aya_ebpf::helpers::bpf_get_stack; // Already imported at top of kprobe section
+use aya_ebpf::helpers::bpf_get_stack;
 
 static mut DEBUG_STACK_BUF: [u64; MAX_STACK_TRACE_DEPTH] = [0; MAX_STACK_TRACE_DEPTH];
 
 #[allow(dead_code)]
-fn debug_dump_stack<C: aya_ebpf::BpfContext>(ctx: &C, func_name_for_log: &str) { // Context type is generic
+fn debug_dump_stack<C: aya_ebpf::EbpfContext>(ctx: &C, func_name_for_log: &str) { // Corrected to EbpfContext
     let kstacklen = unsafe {
         bpf_get_stack(
             ctx.as_ptr(),
@@ -501,10 +501,13 @@ fn debug_file_is_tp(filename_bytes: &[u8]) -> bool {
 }
 
 #[allow(dead_code)]
-fn debug_proc<C: aya_ebpf::BpfContext>(ctx: &C, filename_bytes: &[u8]) -> bool { // Context type is generic
+fn debug_proc<C: aya_ebpf::EbpfContext>(ctx: &C, filename_bytes: &[u8]) -> bool { // Corrected to EbpfContext
     let comm_array = match aya_ebpf::helpers::bpf_get_current_comm() {
         Ok(comm) => comm,
-        Err(_) => return true,
+        Err(_) => {
+            trace!(ctx, "debug_proc: failed to get current_comm");
+            return true;
+        }
     };
     let comm_len = comm_array.iter().position(|&b| b == 0).unwrap_or(comm_array.len());
     let comm_slice = &comm_array[..comm_len];
