@@ -9,3 +9,4 @@ edition = "2021"
 anyhow = "1"
 clap = { version = "4.0", features = ["derive"] }
 thiserror = "1"
+# aya-builder = "0.1.0" # Removed as xtask is now minimal
