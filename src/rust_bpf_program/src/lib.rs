@@ -10,10 +10,10 @@ fn panic(_info: &PanicInfo) -> ! {
 
 use aya_ebpf_macros::{map, kprobe, kretprobe};
 use aya_ebpf::cty;
-use aya_ebpf::EbpfContext as _; // Import trait for as_ptr() and other context methods
+// use aya_ebpf::EbpfContext as _; // Removed this unused import
 
 // Logging macros from aya_log_ebpf
-use aya_log_ebpf::{info, trace}; // Added trace back
+use aya_log_ebpf::{info, trace}; // trace re-added as it's used in debug_proc
 
 
 // --- START: Translated from dirt.h ---
@@ -459,7 +459,7 @@ fn try_security_inode_unlink_internal(ctx: ProbeContext) -> Result<u32, i64> {
 // --- END: Kprobe Definitions ---
 
 // --- START: Debugging Utilities ---
-use aya_ebpf::helpers::bpf_get_stack;
+use aya_ebpf::helpers::bpf_get_stack; // Already imported at top of kprobe section
 
 static mut DEBUG_STACK_BUF: [u64; MAX_STACK_TRACE_DEPTH] = [0; MAX_STACK_TRACE_DEPTH];
 
