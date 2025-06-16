@@ -15,34 +15,40 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_endian.h>
 
+#ifdef FOR_SKELETON_GENERATION
+#define MAPS_SECTION SEC(".maps")
+#else
+#define MAPS_SECTION SEC("maps")
+#endif
+
 char LICENSE[] SEC("license") = "GPL v2";
 
 /* bpf maps */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, sizeof(struct RECORD_FS) * 8192);
-} ringbuf_records SEC(".maps");
+} ringbuf_records MAPS_SECTION;
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, MAP_RECORDS_MAX);
     __type(key, __u64);
     __type(value, struct RECORD_FS);
-} hash_records SEC(".maps");
+} hash_records MAPS_SECTION;
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
     __type(key, int);
     __type(value, struct RECORD_FS);
-} heap_record_fs SEC(".maps");
+} heap_record_fs MAPS_SECTION;
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 1);
     __type(key, int);
     __type(value, struct STATS);
-} stats SEC(".maps");
+} stats MAPS_SECTION;
 
 /* glabal variables shared with userspace */
 const volatile __u64 ts_start;

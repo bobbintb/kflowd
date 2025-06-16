@@ -141,13 +141,20 @@ $(OUTPUT):
 	$(Q)mkdir -p $@
 
 # Build BPF code
+# Rule for runtime BPF object
 $(OUTPUT)/%.bpf.o: %.bpf.c *.h $(VMLINUX) | $(OUTPUT)
-	$(call msg,BPF,$@)
+	$(call msg,BPF_RUNTIME,$@)
 	$(Q)$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES) -c $(filter %.c,$^) -o $@
 	$(Q)$(LLVM_STRIP) -g $@
 
+# Rule for BPF object used for skeleton generation
+$(OUTPUT)/%.bpf.o.skel_gen: %.bpf.c *.h $(VMLINUX) | $(OUTPUT)
+	$(call msg,BPF_SKEL_OBJ,$@)
+	$(Q)$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES) -DFOR_SKELETON_GENERATION -c $(filter %.c,$^) -o $@
+	$(Q)$(LLVM_STRIP) -g $@
+
 # Generate BPF skeletons
-$(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) $(BPFTOOL)
+$(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o.skel_gen | $(OUTPUT) $(BPFTOOL)
 	$(call msg,GEN-SKEL,$@)
 	$(Q)$(BPFTOOL) gen skeleton $< > $@
 
