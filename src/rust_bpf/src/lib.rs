@@ -1,3 +1,10 @@
+use aya_ebpf::macros::{kprobe, kretprobe, map};
+use aya_ebpf::maps::LruHashMap;
+use aya_ebpf::maps::PerCpuArray;
+use aya_ebpf::maps::Array;
+use aya_ebpf::programs::ProgramContext;
+pub mod vmlinux;
+use core::ffi::c_void;
 #![no_std]
 #![no_main]
 
@@ -77,3 +84,268 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     // A minimal panic handler that just loops indefinitely.
     loop {}
 }
+
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Stats {
+    pub fs_records: u64,
+    pub fs_records_deleted: u64,
+    pub fs_records_dropped: u64,
+    pub fs_records_rb_max: u64,
+    pub fs_events: u64,
+}
+
+
+
+const MAP_RECORDS_MAX: u32 = 65536;
+
+#[map]
+pub static mut HASH_RECORDS: LruHashMap<u64, RecordFs> =
+    LruHashMap::with_max_entries(MAP_RECORDS_MAX, 0);
+
+#[map]
+pub static mut HEAP_RECORD_FS: PerCpuArray<RecordFs> =
+    PerCpuArray::with_max_entries(1, 0);
+
+#[map]
+pub static mut STATS_MAP: Array<Stats> =
+    Array::with_max_entries(1, 0);
+
+
+// === KPROBE/KRETPROBE STUBS START ===
+
+// --- kretprobe for do_filp_open ---
+#[kretprobe]
+pub fn do_filp_open(ctx: ProgramContext) -> u32 {
+    match unsafe { try_do_filp_open(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_do_filp_open(ctx: ProgramContext) -> Result<u32, u32> {
+    // Placeholder: actual logic later
+    // Use ctx.ret() for return value (*const file)
+    Ok(0)
+}
+
+// --- kprobe for security_inode_link ---
+#[kprobe]
+pub fn security_inode_link(ctx: ProgramContext) -> u32 {
+    match unsafe { try_security_inode_link(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_security_inode_link(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct dentry *old_dentry, struct inode *dir, struct dentry *new_dentry
+    // Use ctx.arg(0), ctx.arg(1), ctx.arg(2)
+    Ok(0)
+}
+
+// --- kprobe for security_inode_symlink ---
+#[kprobe]
+pub fn security_inode_symlink(ctx: ProgramContext) -> u32 {
+    match unsafe { try_security_inode_symlink(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_security_inode_symlink(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct inode *dir, struct dentry *dentry, const char *old_name
+    Ok(0)
+}
+
+// --- kprobe for dput ---
+#[kprobe]
+pub fn dput(ctx: ProgramContext) -> u32 {
+    match unsafe { try_dput(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_dput(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct dentry *dentry
+    Ok(0)
+}
+
+// --- kprobe for notify_change ---
+#[kprobe]
+pub fn notify_change(ctx: ProgramContext) -> u32 {
+    match unsafe { try_notify_change(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_notify_change(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct dentry *dentry, struct iattr *attr
+    Ok(0)
+}
+
+// --- kprobe for __fsnotify_parent ---
+#[kprobe]
+pub fn __fsnotify_parent(ctx: ProgramContext) -> u32 {
+    match unsafe { try___fsnotify_parent(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try___fsnotify_parent(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct dentry *dentry, __u32 mask, const void *data, int data_type
+    Ok(0)
+}
+
+// --- kprobe for security_inode_rename ---
+#[kprobe]
+pub fn security_inode_rename(ctx: ProgramContext) -> u32 {
+    match unsafe { try_security_inode_rename(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_security_inode_rename(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct inode *old_dir, struct dentry *old_dentry,
+    //       struct inode *new_dir, struct dentry *new_dentry
+    Ok(0)
+}
+
+// --- kprobe for security_inode_unlink ---
+#[kprobe]
+pub fn security_inode_unlink(ctx: ProgramContext) -> u32 {
+    match unsafe { try_security_inode_unlink(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_security_inode_unlink(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct inode *dir, struct dentry *dentry
+    Ok(0)
+}
+// === KPROBE/KRETPROBE STUBS END ===
+
+
+// === KPROBE/KRETPROBE STUBS START ===
+
+// --- kretprobe for do_filp_open ---
+#[kretprobe]
+pub fn do_filp_open(ctx: ProgramContext) -> u32 {
+    match unsafe { try_do_filp_open(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_do_filp_open(ctx: ProgramContext) -> Result<u32, u32> {
+    // Placeholder: actual logic later
+    // Use ctx.ret() for return value (*const file)
+    Ok(0)
+}
+
+// --- kprobe for security_inode_link ---
+#[kprobe]
+pub fn security_inode_link(ctx: ProgramContext) -> u32 {
+    match unsafe { try_security_inode_link(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_security_inode_link(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct dentry *old_dentry, struct inode *dir, struct dentry *new_dentry
+    // Use ctx.arg(0), ctx.arg(1), ctx.arg(2)
+    Ok(0)
+}
+
+// --- kprobe for security_inode_symlink ---
+#[kprobe]
+pub fn security_inode_symlink(ctx: ProgramContext) -> u32 {
+    match unsafe { try_security_inode_symlink(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_security_inode_symlink(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct inode *dir, struct dentry *dentry, const char *old_name
+    Ok(0)
+}
+
+// --- kprobe for dput ---
+#[kprobe]
+pub fn dput(ctx: ProgramContext) -> u32 {
+    match unsafe { try_dput(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_dput(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct dentry *dentry
+    Ok(0)
+}
+
+// --- kprobe for notify_change ---
+#[kprobe]
+pub fn notify_change(ctx: ProgramContext) -> u32 {
+    match unsafe { try_notify_change(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_notify_change(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct dentry *dentry, struct iattr *attr
+    Ok(0)
+}
+
+// --- kprobe for __fsnotify_parent ---
+#[kprobe]
+pub fn __fsnotify_parent(ctx: ProgramContext) -> u32 {
+    match unsafe { try___fsnotify_parent(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try___fsnotify_parent(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct dentry *dentry, __u32 mask, const void *data, int data_type
+    Ok(0)
+}
+
+// --- kprobe for security_inode_rename ---
+#[kprobe]
+pub fn security_inode_rename(ctx: ProgramContext) -> u32 {
+    match unsafe { try_security_inode_rename(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_security_inode_rename(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct inode *old_dir, struct dentry *old_dentry,
+    //       struct inode *new_dir, struct dentry *new_dentry
+    Ok(0)
+}
+
+// --- kprobe for security_inode_unlink ---
+#[kprobe]
+pub fn security_inode_unlink(ctx: ProgramContext) -> u32 {
+    match unsafe { try_security_inode_unlink(ctx) } {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+unsafe fn try_security_inode_unlink(ctx: ProgramContext) -> Result<u32, u32> {
+    // Args: struct inode *dir, struct dentry *dentry
+    Ok(0)
+}
+// === KPROBE/KRETPROBE STUBS END ===

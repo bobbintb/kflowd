@@ -1,0 +1,8 @@
+error: unexpected argument '--header-file' found
+
+  tip: a similar argument exists: '--header'
+  tip: to pass '--header-file' as a value, use '-- --header-file'
+
+Usage: aya-tool generate --header <HEADER> [NAMES]... [-- <BINDGEN_ARGS>...]
+
+For more information, try '--help'.
