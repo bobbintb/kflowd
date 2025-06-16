@@ -228,7 +228,17 @@ enum check { c_fail, c_ok, c_warn };
 
 /* define config struct */
 struct CONFIG {
-    bool output_unix_socket_create_if_missing;
+    int   monitor;
+    bool  mode_daemon;
+    int   agg_events_max;
+    int   output_type;
+    char  output_unix_socket_path[UNIX_SOCKET_PATH_MAX];
+    bool  output_unix_socket;
+    bool  output_quiet;
+    bool  verbose;
+    char  token[TOKEN_LEN_MAX];
+    char  debug[DBG_LEN_MAX];
+    bool  output_unix_socket_create_if_missing; // The new field
 };
 
 /* define filesystem event info for ringbuffer event handler */
