@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::{macros::map, maps::RingBuf};
-// Removed: use core::ffi::c_char;
+use aya_ebpf::{macros::{kprobe, map}, programs::ProbeContext, maps::RingBuf, EbpfContext}; // Added kprobe, ProbeContext, EbpfContext
+use aya_log_ebpf::info; // For logging from BPF
 
 // Constants from dirt.h
 const RECORD_TYPE_FILE: u32 = 1;
@@ -55,19 +55,34 @@ pub struct RecordFs {
 const RINGBUF_MAX_ENTRIES: u32 = (core::mem::size_of::<RecordFs>() * 8192) as u32;
 
 #[map]
-pub static mut RINGBUF_RECORDS: RingBuf = RingBuf::with_byte_size(RINGBUF_MAX_ENTRIES, 0); // Changed with_max_entries to with_byte_size
+pub static mut RINGBUF_RECORDS: RingBuf = RingBuf::with_byte_size(RINGBUF_MAX_ENTRIES, 0);
 
-// Dummy entry point, actual BPF programs will be added later
-#[no_mangle]
-pub extern "C" fn main_prog(_ctx: *const ::core::ffi::c_void) -> i32 { // Changed argument type
-    match unsafe { try_main_prog(_ctx) } {
+#[kprobe] // Define it as a kprobe
+pub fn example_kprobe(ctx: ProbeContext) -> u32 {
+    match unsafe { try_example_kprobe(ctx) } {
         Ok(ret) => ret,
         Err(ret) => ret,
     }
 }
 
-unsafe fn try_main_prog(_ctx: *const ::core::ffi::c_void) -> Result<i32, i32> {
-    // Actual program logic will go here. For now, it's a no-op.
+unsafe fn try_example_kprobe(ctx: ProbeContext) -> Result<u32, u32> {
+    // Minimal check or log to ensure map is accessed
+    info!(&ctx, "Example kprobe triggered, accessing RINGBUF_RECORDS");
+
+    // Attempt a reserve, but don't necessarily commit if it's complex.
+    // The main goal is to have RINGBUF_RECORDS referenced by a program.
+    let entry = RINGBUF_RECORDS.reserve::<RecordFs>(0);
+    match entry {
+        Some(mut _entry_data) => {
+            // _entry_data.data.write(RecordFs { ... }); // Populate if needed
+            // _entry_data.submit(0); // Submit data
+            info!(&ctx, "Reserved entry in RINGBUF_RECORDS");
+        }
+        None => {
+            info!(&ctx, "Failed to reserve entry in RINGBUF_RECORDS");
+            return Err(1);
+        }
+    }
     Ok(0)
 }
 
