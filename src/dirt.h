@@ -224,6 +224,11 @@ struct FS_EVENT fsevt[] = {{I_CREATE, FS_CREATE, "CREATE", "CRE", "CR"},
 #define CHECK_MSG_LEN_MAX 64
 enum check { c_fail, c_ok, c_warn };
 
+/* define config struct */
+struct CONFIG {
+    bool output_unix_socket_create_if_missing;
+};
+
 /* define filesystem event info for ringbuffer event handler */
 struct FS_EVENT_INFO {
     int            index;

@@ -74,6 +74,7 @@ static char usage_str[] =
     "  -x SOCKET_PATH           Unix domain socket path to send json output to.\n"
     "                           Output also printed to stdout console unless quiet option -q or\n"
     "                             daemon mode -d specified\n"
+    "  -c, --create-socket    Create the Unix domain socket if it does not exist (no prompt).\n"
     "  -q                       Quiet mode to suppress output to stdout console\n"
     "  -d                       Daemonize program to run in background\n"
     "  -V                       Verbose output\n"
@@ -83,6 +84,7 @@ static char usage_str[] =
     "  -l, --legend             Show legend\n"
     "  -h, --help               Show help\n"
     "      --version            Show version\n"
+    "  -c, --create-socket      Create Unix domain socket if it does not exist\n"
     "  -D PROCESS               Debug\n"
     "                             Print ebpf kernel log messages of process to kernel trace pipe\n"
     "                             (any process: '*', with quotes!)\n"
@@ -100,7 +102,8 @@ static char doc_str[] =
     "The eBPF program traces kernel functions to monitor processes based on filesystem events.\n"
     "Events are aggregated and submitted into a ringbuffer where they are polled by the userspace\n"
     "control application and converted into messages in json output format.\n"
-    "Messages are printed to stdout console and can be sent via Unix domain socket to a specified path.\n\n";
+    "Messages are printed to stdout console and can be sent via Unix domain socket to a specified path.\n"
+    "The program can also be configured to automatically create the socket if it's missing, or prompt for creation.\n\n";
 
 static void usage(char *msg) {
     fprintf(stdout, "%s", header_str);
@@ -118,6 +121,7 @@ static struct option longopts[] = {{"legend", no_argument, NULL, 'l'},
                                    {"help", no_argument, NULL, 'h'},
                                    {"version", no_argument, (int *)&opt_version, 1},
                                    {"unix-socket", required_argument, NULL, 'x'},
+                                   {"create-socket", no_argument, NULL, 'c'},
                                    {0, 0, 0, 0}};
 
 /* define globals */
@@ -135,6 +139,7 @@ static struct CONFIG {
     char  output_unix_socket_path[UNIX_SOCKET_PATH_MAX];
     bool  output_unix_socket; // Flag to indicate if socket path is set
     bool  output_quiet;       // Generic quiet flag
+    bool  output_unix_socket_create_if_missing; // Added for --create-socket
     bool  verbose;
     char  token[TOKEN_LEN_MAX];
     char  debug[DBG_LEN_MAX];
@@ -375,13 +380,18 @@ int main(int argc, char **argv) {
 
     config.monitor = MONITOR_FILE;
     config.output_type = JSON_FULL;
+    config.output_unix_socket_create_if_missing = false; // Initialize
 
     struct utsname local_utsn;
     uname(&local_utsn);
 
 
-    while ((opt = getopt_long(argc, argv, ":e:o:x:qdT:lhVD:", longopts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, ":e:o:x:qdT:lhVD:c", longopts, NULL)) != -1) { // Added 'c' to getopt_long
         switch (opt) {
+        case 'c':
+            config.output_unix_socket_create_if_missing = true;
+            argn++;
+            break;
         case 'e':
             config.agg_events_max = atoi(optarg);
             for (cnt = 0; cnt < (int)strlen(optarg); cnt++)
@@ -461,6 +471,84 @@ int main(int argc, char **argv) {
     if (geteuid()) {
         fprintf(stderr, "Run this program with sudo or as root user\n");
         return 1;
+    }
+
+    // Socket creation logic (before daemonization)
+    if (config.output_unix_socket) {
+        struct stat st;
+        if (stat(config.output_unix_socket_path, &st) != 0) { // Socket does not exist
+            bool create_socket_now = false;
+            if (config.mode_daemon) {
+                if (config.output_unix_socket_create_if_missing) {
+                    create_socket_now = true;
+                } else {
+                    fprintf(stderr, "Unix socket %s missing and --create-socket not specified in daemon mode. Disabling socket output.\n", config.output_unix_socket_path);
+                    config.output_unix_socket = false;
+                }
+            } else { // Not daemon mode
+                if (config.output_unix_socket_create_if_missing) {
+                    create_socket_now = true;
+                } else {
+                    printf("Unix socket %s does not exist. Create it? (y/n): ", config.output_unix_socket_path);
+                    int user_char = getchar();
+                    // consume trailing newline
+                    if(user_char != '\n' && user_char != EOF) {
+                        int temp_char;
+                        while((temp_char = getchar()) != '\n' && temp_char != EOF);
+                    }
+
+                    if (user_char == 'y' || user_char == 'Y') {
+                        create_socket_now = true;
+                    } else if (user_char == 'n' || user_char == 'N') {
+                        printf("Proceeding without Unix socket output.\n");
+                        config.output_unix_socket = false;
+                    } else {
+                        fprintf(stderr, "Invalid input. Disabling socket output.\n");
+                        config.output_unix_socket = false;
+                    }
+                }
+            }
+
+            if (create_socket_now && config.output_unix_socket) { // Check config.output_unix_socket again in case it was changed
+                int sock_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+                if (sock_fd < 0) {
+                    perror("Failed to create socket descriptor for initial creation");
+                    config.output_unix_socket = false;
+                } else {
+                    struct sockaddr_un server_addr;
+                    memset(&server_addr, 0, sizeof(struct sockaddr_un));
+                    server_addr.sun_family = AF_UNIX;
+                    strncpy(server_addr.sun_path, config.output_unix_socket_path, sizeof(server_addr.sun_path) - 1);
+                    server_addr.sun_path[sizeof(server_addr.sun_path) - 1] = '\0'; // Ensure null termination
+
+                    // Remove existing socket file if it exists, to avoid bind error
+                    unlink(config.output_unix_socket_path);
+
+                    if (bind(sock_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_un)) < 0) {
+                        perror("Failed to bind and create Unix socket");
+                        fprintf(stderr, "Please check permissions and if the path %s is valid.\n", config.output_unix_socket_path);
+                        config.output_unix_socket = false;
+                    } else {
+                        // Successfully created and bound.
+                        // The socket will be used by unix_socket_send_msg later.
+                        // We can close this fd as unix_socket_send_msg will create its own.
+                        if (config.verbose) {
+                             fprintf(stderr, "Unix socket %s created successfully.\n", config.output_unix_socket_path);
+                        }
+                    }
+                    close(sock_fd); // Close the socket fd used for creation
+                }
+            }
+        } else { // Socket exists, check if it's actually a socket
+            if (!S_ISSOCK(st.st_mode)) {
+                 fprintf(stderr, "Error: %s exists but is not a socket. Disabling socket output.\n", config.output_unix_socket_path);
+                 config.output_unix_socket = false;
+            } else {
+                 if (config.verbose) {
+                    fprintf(stderr, "Using existing Unix socket %s.\n", config.output_unix_socket_path);
+                 }
+            }
+        }
     }
 
     libbpf_set_strict_mode(LIBBPF_STRICT_ALL);
