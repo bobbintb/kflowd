@@ -131,19 +131,8 @@ static volatile bool      running = false;
 
 #define UDP_SERVER_MAX 8
 
-static struct CONFIG {
-    int   monitor;
-    bool  mode_daemon;
-    int   agg_events_max;
-    int   output_type;
-    char  output_unix_socket_path[UNIX_SOCKET_PATH_MAX];
-    bool  output_unix_socket; // Flag to indicate if socket path is set
-    bool  output_quiet;       // Generic quiet flag
-    bool  output_unix_socket_create_if_missing; // Added for --create-socket
-    bool  verbose;
-    char  token[TOKEN_LEN_MAX];
-    char  debug[DBG_LEN_MAX];
-} config = {0};
+// Struct CONFIG is now defined in dirt.h
+static struct CONFIG config = {0};
 
 
 static struct JSON_KEY jkey[] = {

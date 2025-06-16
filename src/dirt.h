@@ -10,6 +10,8 @@
 #ifndef __DIRT_H
 #define __DIRT_H
 
+#include <stdbool.h> // For bool type
+
 /* define minimal kernel requirement */
 #define KERNEL_VERSION_MIN 5
 #define KERNEL_MAJOR_MIN   10
