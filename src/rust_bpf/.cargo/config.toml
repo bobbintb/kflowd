@@ -1,6 +1,6 @@
 [build]
 target = "bpfel-unknown-none"
-rustflags = ["-C", "debuginfo=2", "-Z", "emit-btf"]
+rustflags = ["-C", "debuginfo=2"]
 
 [unstable]
 build-std = ["core", "compiler_builtins"]

@@ -70,9 +70,9 @@ check: $(APPS)
 	$(Q)clang-tidy dirt.c $(CLANG_CHECKS) -- $(CFLAGS) $(INCLUDES)
 
 .PHONY: test
-test:
+test: $(APPS)
 	$(call msg,TEST)
-	$(Q)echo | sudo ./dirt | timeout 60 grep -m1 InfoSequenceNumber
+	$(Q)echo | sudo $(BINDIR)dirt | timeout 60 grep -m1 InfoSequenceNumber
 
 .PHONY: ctags
 ctags:

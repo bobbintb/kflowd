@@ -121,7 +121,7 @@ static struct option longopts[] = {{"legend", no_argument, NULL, 'l'},
                                    {0, 0, 0, 0}};
 
 /* define globals */
-static struct dirt_bpf *skel;
+static struct dirt_bpf_o_skel_gen *skel;
 static struct timespec    spec_start;
 static volatile bool      running = false;
 
@@ -469,7 +469,7 @@ int main(int argc, char **argv) {
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
 
-    skel = dirt_bpf__open();
+    skel = dirt_bpf_o_skel_gen__open();
     if (!skel) {
         fprintf(stderr, "Failed to open and load BPF skeleton\n");
         return 1;
@@ -494,13 +494,13 @@ int main(int argc, char **argv) {
         pclose(fp);
     }
 
-    err = dirt_bpf__load(skel);
+    err = dirt_bpf_o_skel_gen__load(skel);
     if (err) {
         fprintf(stderr, "Failed to load and verify BPF skeleton\n");
         goto cleanup;
     }
 
-    err = dirt_bpf__attach(skel);
+    err = dirt_bpf_o_skel_gen__attach(skel);
     if (err) {
         fprintf(stderr, "Failed to attach BPF skeleton\n");
         goto cleanup;
@@ -609,7 +609,7 @@ int main(int argc, char **argv) {
 
 cleanup:
     ring_buffer__free(rb);
-    dirt_bpf__destroy(skel);
+    dirt_bpf_o_skel_gen__destroy(skel);
     return err < 0 ? -err : 0;
 }
 

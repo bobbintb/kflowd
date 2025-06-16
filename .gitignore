@@ -54,3 +54,6 @@ dkms.conf
 
 # Compiled output directory
 bin/
+
+# Rust build output
+src/rust_bpf/target/
