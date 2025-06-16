@@ -1,6 +1,46 @@
-[build]
-target = "bpfel-unknown-none"
-rustflags = ["-C", "debuginfo=2"]
+# This file is now for settings that should apply when `cargo build`
+# is run for the bpfel-unknown-none target within the rust_bpf workspace,
+# potentially outside of xtask.
+# xtask itself will pass necessary flags directly.
 
-[unstable]
-build-std = ["core", "compiler_builtins"]
+# The [unstable] build-std global flag was causing issues for xtask's dependencies.
+# It's better to pass -Z build-std via RUSTFLAGS or a target-specific rustflag
+# when building the eBPF crate. The xtask script should handle this.
+# For now, ensuring this config doesn't break xtask compilation is key.
+# An empty config, or one that ONLY has target-specific flags that don't include
+# build-std globally, is safest.
+
+# Let's keep it very minimal or target-specific for `runner` if that's how cargo-xtask works.
+# The current xtask script directly calls `cargo build --target bpfel-unknown-none`.
+# The issue is when `cargo run --package xtask` *compiles xtask itself and its deps*.
+# That compilation should NOT see the bpfel target or build-std as global.
+
+# This makes `target` and `build-std` specific to bpfel-unknown-none
+[target.bpfel-unknown-none.build]
+# This syntax for build-std in config is not standard.
+# build-std = ["core", "compiler_builtins"] # This is an [unstable] table key.
+
+# The standard way to influence build-std for a target via config is less direct.
+# It's typically done via RUSTFLAGS in env or command line.
+# The `.cargo/config.toml` `[unstable]` table is global.
+#
+# The simplest fix is to ensure the unstable table for build-std is not present,
+# and let xtask manage all flags for the BPF crate build.
+# If users want to `cargo build --target bpfel-unknown-none` directly in `src/rust_bpf`,
+# they'd need to set RUSTFLAGS themselves or have a more complex config.
+# For this subtask, focus on making xtask work.
+
+# Thus, an empty .cargo/config.toml in src/rust_bpf/ is safest to ensure xtask builds with host defaults.
+# The xtask script will then set ALL flags for the eBPF crate.
+# However, the original .cargo/config.toml also set the default target for the workspace:
+# [build]
+# target = "bpfel-unknown-none"
+# This is what needs to be avoided for xtask's own build.
+
+# Try with only target-specific rustflags, removing global build and unstable.
+[target.bpfel-unknown-none]
+rustflags = ["-C", "debuginfo=2"] # This is fine, xtask also sets it.
+                                  # It does not include -Z build-std.
+                                  # xtask will need to add -Z build-std.
+# No [unstable] table here means build-std won't be picked up globally.
+# No global [build] table means target isn't forced globally.
