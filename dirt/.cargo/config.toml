@@ -1,0 +1,15 @@
+[build]
+target = [
+    "bpfel-unknown-none",
+    "bpfeb-unknown-none",
+]
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+[target.bpfel-unknown-none]
+runner = "cargo-test-bpf"
+
+[target.bpfeb-unknown-none]
+runner = "cargo-test-bpf"

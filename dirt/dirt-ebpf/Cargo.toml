@@ -1,0 +1,41 @@
+[package]
+name = "dirt-ebpf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aya-ebpf = { version = "0.1.1", default-features = true }
+aya-ebpf-macros = "0.1.1"
+aya-log-ebpf = { workspace = true }
+dirt-common = { path = "../dirt-common" }
+aya-ebpf-bindings = "0.1.1" # Adding as a direct dependency
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "dirt"
+path = "src/main.rs"
+
+# Profiles from subtask description
+[profile.dev]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
