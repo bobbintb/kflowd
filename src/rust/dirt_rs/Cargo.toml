@@ -11,11 +11,11 @@ default-members = ["dirt_rs", "dirt_rs-common"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-aya = { version = "0.13.1", default-features = false }
-aya-build = { version = "0.1.2", default-features = false }
-aya-ebpf = { version = "0.1.1", default-features = false }
-aya-log = { version = "0.2.1", default-features = false }
-aya-log-ebpf = { version = "0.1.1", default-features = false }
+aya = { version = "0.12.0", default-features = false }
+aya-build = { version = "0.1.1", default-features = false } # aya 0.12.0 was released with aya-build 0.1.1
+aya-ebpf = { version = "0.1.0", default-features = false } # aya 0.12.0 was released with aya-ebpf 0.1.0
+aya-log = { version = "0.2.0", default-features = false } # aya 0.12.0 was released with aya-log 0.2.0
+aya-log-ebpf = { version = "0.1.0", default-features = false } # aya 0.12.0 was released with aya-log-ebpf 0.1.0
 
 anyhow = { version = "1", default-features = false }
 # `std` feature is currently required to build `clap`.
@@ -27,6 +27,13 @@ libc = { version = "0.2.159", default-features = false }
 log = { version = "0.4.22", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 which = { version = "6.0.0", default-features = false }
+serde = { version = "1.0.204", default-features = false }
+serde_json = { version = "1.0.120", default-features = false }
+# nix removed from workspace, defined directly in dirt_rs/Cargo.toml
+chrono = { version = "0.4.38", default-features = false } # Userspace crate enables "serde"
+home = { version = "=0.5.9", default-features = false } # Pinning home version for rustc 1.75.0 compatibility (exact)
+cargo-platform = { version = "0.1.8", default-features = false } # Pinning for rustc 1.75.0 and clap compatibility
+cargo_metadata = { version = "0.15.4", default-features = false } # Pinning for rustc 1.75.0 & aya-build 0.1.1 compatibility
 
 [profile.release.package.dirt_rs-ebpf]
 debug = 2
