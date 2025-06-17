@@ -25,7 +25,7 @@ tokio = { workspace = true, features = [
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-# nix dependency removed as geteuid is now sourced from libc directly.
+# nix dependency fully removed, using libc::geteuid for root check.
 chrono = { workspace = true, features = ["serde"] } # Added serde feature for consistency
 
 

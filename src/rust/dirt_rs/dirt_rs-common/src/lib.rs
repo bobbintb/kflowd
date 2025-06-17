@@ -38,12 +38,15 @@ pub const FILEPATH_LEN_MAX: usize = 96;
 pub const FS_EVENT_MAX: usize = 15; // Based on the fsevt array in dirt.h
 pub const TASK_COMM_LEN: usize = 32;
 pub const DBG_LEN_MAX: usize = 16;
+pub const MAP_RECORDS_MAX: usize = 65536; // From C dirt.h MAP_RECORDS_MAX
+pub const PROG_NAME_MAX: usize = 64; // For FS_EVENT_INFO.func
 
 // Record types
 pub const RECORD_TYPE_FILE: u32 = 1;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
+#[allow(non_camel_case_types)] // To allow C-style enum variant names
 pub enum INDEX_FS_EVENT {
     #[default]
     I_CREATE,
@@ -99,15 +102,16 @@ impl core::fmt::Debug for RecordFsUnion {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Potentially print based on context, or just show one variant
         // For simplicity, let's assume filename is the more common case or a safe default to show
+        let name_slice = unsafe { &self.filename[..core::cmp::min(self.filename.len(), 16)] };
         f.debug_struct("RecordFsUnion")
-         .field("filename (first 16 bytes if from/to)", unsafe { &self.filename[..core::cmp::min(self.filename.len(), 16)] }) // Show a snippet
+         .field("filename (first 16 bytes if from/to)", &&name_slice) // Coerce to &&[u8]
          .finish()
     }
 }
 
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)] // Removed Default from derive
 pub struct RECORD_FS {
     pub rc: RECORD,
     pub events: u32,
@@ -124,6 +128,26 @@ pub struct RECORD_FS {
     pub name_union: RecordFsUnion, // Contains the union
 }
 
+impl Default for RECORD_FS {
+    fn default() -> Self {
+        RECORD_FS {
+            rc: Default::default(),
+            events: 0,
+            event: [0; FS_EVENT_MAX], // Default for array
+            ino: 0,
+            imode: 0,
+            inlink: 0,
+            isize: 0,
+            atime_nsec: 0,
+            mtime_nsec: 0,
+            ctime_nsec: 0,
+            isize_first: 0,
+            filepath: [0; FILEPATH_LEN_MAX], // Default for array
+            name_union: Default::default(),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
 pub struct STATS {
@@ -135,12 +159,23 @@ pub struct STATS {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)] // Removed Default from derive here
 pub struct FS_EVENT_INFO {
     pub index: i32, // C int is typically i32
     pub dentry: u64, // Representing void* or struct dentry* as u64
     pub dentry_old: u64, // Representing void* or struct dentry* as u64
-    pub func: [u8; 64], // Representing char* func as a fixed-size buffer for the name
+    pub func: [u8; PROG_NAME_MAX], // Representing char* func as a fixed-size buffer for the name
+}
+
+impl Default for FS_EVENT_INFO {
+    fn default() -> Self {
+        FS_EVENT_INFO {
+            index: 0,
+            dentry: 0,
+            dentry_old: 0,
+            func: [0; PROG_NAME_MAX], // Default for array
+        }
+    }
 }
 
 #[repr(C)]

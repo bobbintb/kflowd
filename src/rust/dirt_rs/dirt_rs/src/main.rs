@@ -7,7 +7,7 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use clap::Parser;
 use dirt_rs_common::*;
 use log::{info, warn, error, debug};
-use nix::libc::{RLIMIT_MEMLOCK, rlimit, setrlimit}; // geteuid will be used from libc directly
+use nix::libc::{RLIMIT_MEMLOCK, rlimit, setrlimit}; // RLIMIT_MEMLOCK etc. are fine via nix::libc
 use libc::geteuid; // Use libc::geteuid directly
 use serde::Serialize;
 use serde_json::json;
@@ -291,7 +291,7 @@ async fn main() -> anyhow::Result<()> {
     // Clap handles --version automatically due to `version = VERSION` in `#[clap()]`
     // No need for cli.version_short()
 
-    if unsafe { geteuid() } != 0 { // Using libc::geteuid directly
+    if unsafe { geteuid() } != 0 { // Using libc::geteuid directly for root check
         error!("You must be root to use dirt_rs.");
         // Using a specific exit code might be good, e.g. std::process::exit(1)
         return Err(anyhow::anyhow!("Permission denied: must be root."));
