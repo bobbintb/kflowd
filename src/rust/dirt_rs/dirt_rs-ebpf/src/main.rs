@@ -9,14 +9,17 @@
 
 use aya_ebpf::{
     macros::{map, kprobe, kretprobe}, // Removed bpf_core_read from here
-    programs::{ProbeContext, RetProbeContext}, // RetProbeContext moved here
+    programs::{ProbeContext, RetProbeContext},
     maps::{RingBuf, LruHashMap, PerCpuArray, Array},
     helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_ns, bpf_probe_read_kernel_str_bytes},
     bindings::{dentry, file, inode, iattr},
+    // Using aya_ebpf::bpf_core_read directly as it's often re-exported
+    // If issues persist, specific `use aya_ebpf::macros::bpf_core_read` might be needed,
+    // or ensuring `aya-ebpf` features enable its global availability.
 };
 // Logging is usually done via bpf_printk for simple cases or custom maps for complex cases.
 // The info! macro from aya_log_ebpf might require specific features/setup.
-// For now, direct logging from handle_fs_event was removed.
+// For now, direct logging from handle_fs_event was removed. Logging can be done in kprobes.
 use core::ffi::c_char;
 
 use dirt_rs_common::*; // Import shared structs and constants
@@ -84,7 +87,7 @@ fn handle_fs_event(event_info: FsEventInfo) -> Result<(), i32> {
 
     let key = key_pid_ino(event_info.pid, event_info.inode_number);
     let existing_record_ptr_opt = unsafe { HASH_RECORDS.get_ptr_mut(&key) };
-    let ts_event = bpf_ktime_get_ns();
+    let ts_event = unsafe { bpf_ktime_get_ns() }; // Made unsafe call
 
     if let Some(record_fs_ptr) = existing_record_ptr_opt {
         unsafe {
@@ -187,7 +190,7 @@ fn get_file_path_from_dentry(dentry_ptr: *const dentry) -> Result<[u8; FILEPATH_
     let mut total_len = 0;
     for _ in 0..FILEPATH_NODE_MAX {
         if current_dentry_ptr.is_null() { break; }
-        let name_src_ptr = unsafe { bpf_core_read!((*current_dentry_ptr).d_name.name) } as *const c_char;
+        let name_src_ptr = unsafe { aya_ebpf::bpf_core_read!((*current_dentry_ptr).d_name.name) } as *const c_char;
         let mut name_bytes_temp = [0u8; DNAME_INLINE_LEN];
         let len_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(name_src_ptr, &mut name_bytes_temp) } {
             Ok(length) => length, Err(e_code) => return Err(e_code as i32),
@@ -200,7 +203,7 @@ fn get_file_path_from_dentry(dentry_ptr: *const dentry) -> Result<[u8; FILEPATH_
         if current_offset < 0 { break; }
         unsafe { core::ptr::copy_nonoverlapping(name_bytes_temp.as_ptr(), path_bytes.as_mut_ptr().add(current_offset), actual_len); }
         total_len += actual_len;
-        let parent_dentry_ptr = unsafe { bpf_core_read!((*current_dentry_ptr).d_parent) };
+        let parent_dentry_ptr = unsafe { aya_ebpf::bpf_core_read!((*current_dentry_ptr).d_parent) };
         if current_dentry_ptr == parent_dentry_ptr {
             if total_len > 0 && current_offset > 0 { current_offset -= 1; path_bytes[current_offset] = b'/'; total_len += 1; }
             break;
@@ -226,33 +229,33 @@ fn try_kretprobe_do_filp_open(ctx: RetProbeContext) -> Result<(), i32> {
     if settings.monitor_mode & MONITOR_FILE == 0 { return Ok(()); }
     let filp_ptr = ctx.ret() as *const file;
     if filp_ptr.is_null() { return Err(2i32); }
-    let f_mode: u32 = unsafe { bpf_core_read!((*filp_ptr).f_mode) };
+    let f_mode: u32 = unsafe { aya_ebpf::bpf_core_read!((*filp_ptr).f_mode) };
     if f_mode & FMODE_CREATED == FMODE_CREATED {
-        let dentry_ptr = unsafe { bpf_core_read!((*filp_ptr).f_path.dentry) };
+        let dentry_ptr = unsafe { aya_ebpf::bpf_core_read!((*filp_ptr).f_path.dentry) };
         if dentry_ptr.is_null() { return Err(3i32); }
-        let inode_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_inode) };
+        let inode_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_ptr).d_inode) };
         if inode_ptr.is_null() { return Err(4i32); }
-        let pid_tgid = bpf_get_current_pid_tgid();
+        let pid_tgid = unsafe { bpf_get_current_pid_tgid() }; // Made unsafe
         let pid = (pid_tgid >> 32) as u32;
         if settings.pid_self == pid || settings.pid_shell == pid { return Ok(()); }
-        let i_mode: u32 = unsafe { bpf_core_read!((*inode_ptr).i_mode) };
+        let i_mode: u32 = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_mode) };
         if !(((i_mode & 0o170000u32) == 0o100000u32) || ((i_mode & 0o170000u32) == 0o120000u32)) { return Ok(()); }
         let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
-        let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
+        let d_name_char_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
         let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
             Ok(val) => val, Err(e) => return Err(e as i32)
         };
-        if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+        if bytes_read_usize == 0 { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
 
         let filepath_bytes = get_file_path_from_dentry(dentry_ptr)?;
         let event_info = FsEventInfo {
-            event_type: FsEvent::Create, pid, inode_number: unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32,
+            event_type: FsEvent::Create, pid, inode_number: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_ino) } as u32,
             file_mode: i_mode, filename: filename_bytes, new_filename_if_moved: None, filepath: filepath_bytes,
-            size: unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64,
-            atime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) },
-            mtime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) },
-            ctime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
-            nlink: unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32,
+            size: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_size) } as u64,
+            atime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) },
+            mtime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) },
+            ctime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
+            nlink: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_nlink) } as u32,
         };
         handle_fs_event(event_info)?;
     }
@@ -270,29 +273,29 @@ fn try_kprobe_security_inode_link(ctx: ProbeContext) -> Result<(), i32> {
     if settings.monitor_mode & MONITOR_FILE == 0 { return Ok(()); }
     let new_dentry_ptr = ctx.arg::<*const dentry>(2).ok_or(11i32)?;
     if new_dentry_ptr.is_null() { return Err(3i32); }
-    let inode_ptr = unsafe { bpf_core_read!((*new_dentry_ptr).d_inode) };
+    let inode_ptr = unsafe { aya_ebpf::bpf_core_read!((*new_dentry_ptr).d_inode) };
     if inode_ptr.is_null() { return Err(4i32); }
-    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() }; // Made unsafe
     let pid = (pid_tgid >> 32) as u32;
     if settings.pid_self == pid || settings.pid_shell == pid { return Ok(()); }
-    let i_mode: u32 = unsafe { bpf_core_read!((*inode_ptr).i_mode) };
+    let i_mode: u32 = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_mode) };
     if !(((i_mode & 0o170000u32) == 0o100000u32) || ((i_mode & 0o170000u32) == 0o120000u32)) { return Ok(()); }
     let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
-    let d_name_char_ptr = unsafe { bpf_core_read!((*new_dentry_ptr).d_name.name) } as *const c_char;
+    let d_name_char_ptr = unsafe { aya_ebpf::bpf_core_read!((*new_dentry_ptr).d_name.name) } as *const c_char;
     let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
         Ok(val) => val, Err(e) => return Err(e as i32)
     };
-    if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+    if bytes_read_usize == 0 { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
 
     let filepath_bytes = get_file_path_from_dentry(new_dentry_ptr)?;
     let event_info = FsEventInfo {
-        event_type: FsEvent::Create, pid, inode_number: unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32,
+        event_type: FsEvent::Create, pid, inode_number: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_ino) } as u32,
         file_mode: i_mode, filename: filename_bytes, new_filename_if_moved: None, filepath: filepath_bytes,
-        size: unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64,
-        atime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) },
-        mtime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) },
-        ctime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
-        nlink: unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32,
+        size: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_size) } as u64,
+        atime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) },
+        mtime_nsec: unsafe { (aya_ebpf::macros::bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) },
+        ctime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
+        nlink: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_nlink) } as u32,
     };
     handle_fs_event(event_info)?;
     Ok(())
@@ -307,7 +310,7 @@ fn try_kprobe_security_inode_symlink(ctx: ProbeContext) -> Result<(), i32> {
     let dentry_ptr = ctx.arg::<*const dentry>(1).ok_or(20i32)?;
     if dentry_ptr.is_null() { return Err(21i32); }
     let dentry_addr = dentry_ptr as u64;
-    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() }; // Made unsafe
     let pid = (pid_tgid >> 32) as u32;
     unsafe { PENDING_SYMLINKS.insert(&pid, &dentry_addr, 0).map_err(|e| e as i32)?; }
     Ok(())
@@ -325,32 +328,32 @@ fn try_kprobe_dput(ctx: ProbeContext) -> Result<(), i32> {
     let dentry_arg_ptr = ctx.arg::<*const dentry>(0).ok_or(30i32)?;
     if dentry_arg_ptr.is_null() { return Ok(()); }
     let dentry_arg_addr = dentry_arg_ptr as u64;
-    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() }; // Made unsafe
     let pid = (pid_tgid >> 32) as u32;
     if let Some(stored_dentry_addr) = unsafe { PENDING_SYMLINKS.get(&pid) } {
         if *stored_dentry_addr == dentry_arg_addr {
             unsafe { PENDING_SYMLINKS.remove(&pid).map_err(|e| e as i32)?; }
-            let inode_ptr = unsafe { bpf_core_read!((*dentry_arg_ptr).d_inode) };
+            let inode_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_arg_ptr).d_inode) };
             if inode_ptr.is_null() { return Ok(()); }
-            let i_mode: u32 = unsafe { bpf_core_read!((*inode_ptr).i_mode) };
+            let i_mode: u32 = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_mode) };
             if (i_mode & 0o170000u32) == 0o120000u32 { /* S_IFLNK */
                 if settings.pid_self == pid || settings.pid_shell == pid { return Ok(()); }
                 let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
-                let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_arg_ptr).d_name.name) } as *const c_char;
+                let d_name_char_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_arg_ptr).d_name.name) } as *const c_char;
                 let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
                     Ok(val) => val, Err(e) => return Err(e as i32)
                 };
-                if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+                if bytes_read_usize == 0 { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
 
                 let filepath_bytes = get_file_path_from_dentry(dentry_arg_ptr)?;
                 let event_info = FsEventInfo {
-                    event_type: FsEvent::Create, pid, inode_number: unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32,
+                    event_type: FsEvent::Create, pid, inode_number: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_ino) } as u32,
                     file_mode: i_mode, filename: filename_bytes, new_filename_if_moved: None, filepath: filepath_bytes,
-                    size: unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64,
-                    atime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) },
-                    mtime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) },
-                    ctime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
-                    nlink: unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32,
+                    size: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_size) } as u64,
+                    atime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) },
+                    mtime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) },
+                    ctime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
+                    nlink: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_nlink) } as u32,
                 };
                 handle_fs_event(event_info)?;
             }
@@ -378,14 +381,14 @@ fn try_kprobe_notify_change(ctx: ProbeContext) -> Result<(), i32> {
     let dentry_ptr = ctx.arg::<*const dentry>(0).ok_or(40i32)?;
     let attr_ptr = ctx.arg::<*const iattr>(1).ok_or(41i32)?;
     if dentry_ptr.is_null() || attr_ptr.is_null() { return Err(42i32); }
-    let inode_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_inode) };
+    let inode_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_ptr).d_inode) };
     if inode_ptr.is_null() { return Err(43i32); }
-    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() }; // Made unsafe
     let pid = (pid_tgid >> 32) as u32;
     if settings.pid_self == pid || settings.pid_shell == pid { return Ok(()); }
-    let i_mode_val: u32 = unsafe { bpf_core_read!((*inode_ptr).i_mode) };
+    let i_mode_val: u32 = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_mode) };
     if !(((i_mode_val & 0o170000u32) == 0o100000u32) || ((i_mode_val & 0o170000u32) == 0o120000u32)) { return Ok(()); }
-    let ia_valid = unsafe { bpf_core_read!((*attr_ptr).ia_valid) };
+    let ia_valid = unsafe { aya_ebpf::bpf_core_read!((*attr_ptr).ia_valid) };
     let mut triggered_events: [(FsEvent, bool); 3] = [(FsEvent::Access, false), (FsEvent::Modify, false), (FsEvent::Attrib, false)];
     if (ia_valid & ATTR_UID != 0) || (ia_valid & ATTR_GID != 0) || (ia_valid & ATTR_MODE != 0) { triggered_events[2].1 = true; }
     if ia_valid & ATTR_SIZE != 0 { triggered_events[1].1 = true; }
@@ -393,19 +396,19 @@ fn try_kprobe_notify_change(ctx: ProbeContext) -> Result<(), i32> {
     else if (ia_valid & ATTR_ATIME != 0) { triggered_events[0].1 = true; }
     else if (ia_valid & ATTR_MTIME != 0) { triggered_events[1].1 = true; }
     let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
-    let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
+    let d_name_char_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
     let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
         Ok(val) => val, Err(e) => return Err(e as i32)
     };
-    if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+    if bytes_read_usize == 0 { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
 
     let filepath_bytes = get_file_path_from_dentry(dentry_ptr)?;
-    let current_size = unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64;
-    let current_atime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) };
-    let current_mtime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) };
-    let current_ctime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
-    let current_nlink = unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32;
-    let current_inode_number = unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32;
+    let current_size = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_size) } as u64;
+    let current_atime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) };
+    let current_mtime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) };
+    let current_ctime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
+    let current_nlink = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_nlink) } as u32;
+    let current_inode_number = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_ino) } as u32;
     for (event_type, should_trigger) in triggered_events.iter() {
         if *should_trigger {
             if *event_type == FsEvent::Access || *event_type == FsEvent::Attrib { continue; }
@@ -437,31 +440,31 @@ fn try_kprobe_fsnotify_parent(ctx: ProbeContext) -> Result<(), i32> {
     let dentry_ptr = ctx.arg::<*const dentry>(0).ok_or(50i32)?;
     let mask = ctx.arg::<u32>(1).ok_or(51i32)?;
     if dentry_ptr.is_null() { return Err(52i32); }
-    let inode_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_inode) };
+    let inode_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_ptr).d_inode) };
     if inode_ptr.is_null() { return Err(53i32); }
-    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() }; // Made unsafe
     let pid = (pid_tgid >> 32) as u32;
     if settings.pid_self == pid || settings.pid_shell == pid { return Ok(()); }
-    let i_mode_val: u32 = unsafe { bpf_core_read!((*inode_ptr).i_mode) };
+    let i_mode_val: u32 = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_mode) };
     if !(((i_mode_val & 0o170000u32) == 0o100000u32) || ((i_mode_val & 0o170000u32) == 0o120000u32)) { return Ok(()); }
     let mut triggered_events: [(FsEvent, bool); 3] = [(FsEvent::Access, false), (FsEvent::Modify, false), (FsEvent::Attrib, false)];
     if mask & FS_ACCESS_MASK != 0 { triggered_events[0].1 = true; }
     if mask & FS_MODIFY_MASK != 0 { triggered_events[1].1 = true; }
     if mask & FS_ATTRIB_MASK != 0 { triggered_events[2].1 = true; }
     let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
-    let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
+    let d_name_char_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
     let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
         Ok(val) => val, Err(e) => return Err(e as i32)
     };
-    if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+    if bytes_read_usize == 0 { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
 
     let filepath_bytes = get_file_path_from_dentry(dentry_ptr)?;
-    let current_size = unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64;
-    let current_atime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) };
-    let current_mtime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) };
-    let current_ctime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
-    let current_nlink = unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32;
-    let current_inode_number = unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32;
+    let current_size = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_size) } as u64;
+    let current_atime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) };
+    let current_mtime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) };
+    let current_ctime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
+    let current_nlink = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_nlink) } as u32;
+    let current_inode_number = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_ino) } as u32;
     for (event_type, should_trigger) in triggered_events.iter() {
         if *should_trigger {
             if *event_type == FsEvent::Access || *event_type == FsEvent::Attrib { continue; }
@@ -489,26 +492,26 @@ fn try_kprobe_security_inode_rename(ctx: ProbeContext) -> Result<(), i32> {
     let old_dentry_ptr = ctx.arg::<*const dentry>(1).ok_or(60i32)?;
     let new_dentry_ptr = ctx.arg::<*const dentry>(3).ok_or(61i32)?;
     if old_dentry_ptr.is_null() || new_dentry_ptr.is_null() { return Err(62i32); }
-    let inode_ptr = unsafe { bpf_core_read!((*old_dentry_ptr).d_inode) };
+    let inode_ptr = unsafe { aya_ebpf::bpf_core_read!((*old_dentry_ptr).d_inode) };
     if inode_ptr.is_null() { return Ok(()); }
-    let i_mode_val: u32 = unsafe { bpf_core_read!((*inode_ptr).i_mode) };
+    let i_mode_val: u32 = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_mode) };
     if (i_mode_val & 0o170000u32) == 0o040000u32 { return Ok(()); }
     if !(((i_mode_val & 0o170000u32) == 0o100000u32) || ((i_mode_val & 0o170000u32) == 0o120000u32)) { return Ok(()); }
-    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() }; // Made unsafe
     let pid = (pid_tgid >> 32) as u32;
     if settings.pid_self == pid || settings.pid_shell == pid { return Ok(()); }
-    let common_inode_number = unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32;
-    let common_size = unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64;
-    let common_atime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) };
-    let common_mtime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) };
-    let pre_op_ctime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
-    let common_nlink = unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32;
+    let common_inode_number = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_ino) } as u32;
+    let common_size = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_size) } as u64;
+    let common_atime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) };
+    let common_mtime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) };
+    let pre_op_ctime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
+    let common_nlink = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_nlink) } as u32;
     let mut old_filename_bytes = [0u8; FILENAME_LEN_MAX];
-    let old_d_name_char_ptr = unsafe { bpf_core_read!((*old_dentry_ptr).d_name.name) } as *const c_char;
+    let old_d_name_char_ptr = unsafe { aya_ebpf::bpf_core_read!((*old_dentry_ptr).d_name.name) } as *const c_char;
     let bytes_read_usize_old: usize = match unsafe { bpf_probe_read_kernel_str_bytes(old_d_name_char_ptr, &mut old_filename_bytes) } {
         Ok(val) => val, Err(e) => return Err(e as i32)
     };
-    if bytes_read_usize_old == 0 || bytes_read_usize_old > old_filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+    if bytes_read_usize_old == 0 { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
 
     let old_filepath_bytes = get_file_path_from_dentry(old_dentry_ptr)?;
     let event_info_from = FsEventInfo {
@@ -519,14 +522,14 @@ fn try_kprobe_security_inode_rename(ctx: ProbeContext) -> Result<(), i32> {
     };
     handle_fs_event(event_info_from)?;
     let mut new_filename_bytes = [0u8; FILENAME_LEN_MAX];
-    let new_d_name_char_ptr = unsafe { bpf_core_read!((*new_dentry_ptr).d_name.name) } as *const c_char;
+    let new_d_name_char_ptr = unsafe { aya_ebpf::bpf_core_read!((*new_dentry_ptr).d_name.name) } as *const c_char;
     let bytes_read_usize_new: usize = match unsafe { bpf_probe_read_kernel_str_bytes(new_d_name_char_ptr, &mut new_filename_bytes) } {
         Ok(val) => val, Err(e) => return Err(e as i32)
     };
-    if bytes_read_usize_new == 0 || bytes_read_usize_new > new_filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+    if bytes_read_usize_new == 0 { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
 
     let new_filepath_bytes = get_file_path_from_dentry(new_dentry_ptr)?;
-    let updated_ctime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
+    let updated_ctime_nsec = unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
     let event_info_to = FsEventInfo {
         event_type: FsEvent::MovedTo, pid, inode_number: common_inode_number, file_mode: i_mode_val,
         filename: old_filename_bytes, new_filename_if_moved: Some(new_filename_bytes),
@@ -548,31 +551,31 @@ fn try_kprobe_security_inode_unlink(ctx: ProbeContext) -> Result<(), i32> {
     if settings.monitor_mode & MONITOR_FILE == 0 { return Ok(()); }
     let dentry_ptr = ctx.arg::<*const dentry>(1).ok_or(70i32)?;
     if dentry_ptr.is_null() { return Err(71i32); }
-    let inode_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_inode) };
+    let inode_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_ptr).d_inode) };
     if inode_ptr.is_null() { return Ok(()); }
-    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() }; // Made unsafe
     let pid = (pid_tgid >> 32) as u32;
     if settings.pid_self == pid || settings.pid_shell == pid { return Ok(()); }
-    let i_mode_val: u32 = unsafe { bpf_core_read!((*inode_ptr).i_mode) };
+    let i_mode_val: u32 = unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_mode) };
     if !(((i_mode_val & 0o170000u32) == 0o100000u32) || ((i_mode_val & 0o170000u32) == 0o120000u32)) { return Ok(()); }
     let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
-    let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
+    let d_name_char_ptr = unsafe { aya_ebpf::bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
     let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
         Ok(val) => val, Err(e) => return Err(e as i32)
     };
-    if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+    if bytes_read_usize == 0 { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
 
     let filepath_bytes = get_file_path_from_dentry(dentry_ptr)?;
     let event_info = FsEventInfo {
         event_type: FsEvent::Delete, pid,
-        inode_number: unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32,
+        inode_number: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_ino) } as u32,
         file_mode: i_mode_val, filename: filename_bytes, new_filename_if_moved: None,
         filepath: filepath_bytes,
-        size: unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64,
-        atime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) },
-        mtime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) },
-        ctime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
-        nlink: unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32,
+        size: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_size) } as u64,
+        atime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) },
+        mtime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_mtime.tv_nsec) as u64) },
+        ctime_nsec: unsafe { (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (aya_ebpf::bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
+        nlink: unsafe { aya_ebpf::bpf_core_read!((*inode_ptr).i_nlink) } as u32,
     };
     handle_fs_event(event_info)?;
     Ok(())
