@@ -8,14 +8,15 @@
 #![no_main]
 
 use aya_ebpf::{
-    macros::{map, kprobe, kretprobe, RetProbeContext, bpf_core_read}, // Added bpf_core_read to macros
-    programs::ProbeContext,
+    macros::{map, kprobe, kretprobe}, // Removed bpf_core_read from here
+    programs::{ProbeContext, RetProbeContext}, // RetProbeContext moved here
     maps::{RingBuf, LruHashMap, PerCpuArray, Array},
-    helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_ns, bpf_probe_read_kernel_str_bytes}, // Removed bpf_trace_printk_unsafe
+    helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_ns, bpf_probe_read_kernel_str_bytes},
     bindings::{dentry, file, inode, iattr},
 };
-// use aya_log_ebpf::info; // Logging within eBPF is often via bpf_printk or custom log map; info! macro might depend on features not used here.
-                        // For now, direct logging from handle_fs_event is removed. Logging can be done in kprobes.
+// Logging is usually done via bpf_printk for simple cases or custom maps for complex cases.
+// The info! macro from aya_log_ebpf might require specific features/setup.
+// For now, direct logging from handle_fs_event was removed.
 use core::ffi::c_char;
 
 use dirt_rs_common::*; // Import shared structs and constants
@@ -75,8 +76,6 @@ struct FsEventInfo {
     nlink: u32,
 }
 
-// Core event handling function. Context (ctx) is removed as it's not universally available
-// or needed if all necessary info is in FsEventInfo or accessible via global helpers/maps.
 fn handle_fs_event(event_info: FsEventInfo) -> Result<(), i32> {
     let zero: u32 = 0;
     let settings = unsafe { EBPF_SETTINGS.get(zero) }.ok_or(1i32)?;
@@ -100,8 +99,10 @@ fn handle_fs_event(event_info: FsEventInfo) -> Result<(), i32> {
             (*record_fs_ptr).event[event_info.event_type as usize] += 1;
 
             if event_info.event_type == FsEvent::MovedTo {
-                if let Some(new_name) = event_info.new_filename_if_moved {
-                    (*record_fs_ptr).union_filenames.filenames_from_to.filename_to = new_name;
+                if let Some(ref actual_new_name_array) = event_info.new_filename_if_moved {
+                    let mut temp_filename_to = [0u8; FILENAME_LEN_MAX / 2];
+                    temp_filename_to.copy_from_slice(&actual_new_name_array[..(FILENAME_LEN_MAX / 2)]);
+                    (*record_fs_ptr).union_filenames.filenames_from_to.filename_to = temp_filename_to;
                 }
             }
         }
@@ -188,11 +189,11 @@ fn get_file_path_from_dentry(dentry_ptr: *const dentry) -> Result<[u8; FILEPATH_
         if current_dentry_ptr.is_null() { break; }
         let name_src_ptr = unsafe { bpf_core_read!((*current_dentry_ptr).d_name.name) } as *const c_char;
         let mut name_bytes_temp = [0u8; DNAME_INLINE_LEN];
-        let len_read = match unsafe { bpf_probe_read_kernel_str_bytes(name_src_ptr, &mut name_bytes_temp) } {
+        let len_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(name_src_ptr, &mut name_bytes_temp) } {
             Ok(length) => length, Err(e_code) => return Err(e_code as i32),
         };
-        if len_read == 0 { break; }
-        let actual_len = name_bytes_temp.iter().position(|&x| x == 0).unwrap_or(len_read.min(DNAME_INLINE_LEN));
+        if len_read_usize == 0 { break; }
+        let actual_len = name_bytes_temp.iter().position(|&x| x == 0).unwrap_or(len_read_usize.min(DNAME_INLINE_LEN));
         if actual_len == 0 { break; }
         if total_len + actual_len + (if total_len > 0 {1} else {0}) > FILEPATH_LEN_MAX { break; }
         current_offset -= actual_len;
@@ -238,10 +239,11 @@ fn try_kretprobe_do_filp_open(ctx: RetProbeContext) -> Result<(), i32> {
         if !(((i_mode & 0o170000u32) == 0o100000u32) || ((i_mode & 0o170000u32) == 0o120000u32)) { return Ok(()); }
         let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
         let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
-        match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
-            Ok(bytes_read) => { if bytes_read == 0 || bytes_read > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); } },
-            Err(e) => return Err(e as i32),
-        }
+        let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
+            Ok(val) => val, Err(e) => return Err(e as i32)
+        };
+        if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+
         let filepath_bytes = get_file_path_from_dentry(dentry_ptr)?;
         let event_info = FsEventInfo {
             event_type: FsEvent::Create, pid, inode_number: unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32,
@@ -252,7 +254,7 @@ fn try_kretprobe_do_filp_open(ctx: RetProbeContext) -> Result<(), i32> {
             ctime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
             nlink: unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32,
         };
-        handle_fs_event(event_info)?; // Removed ctx
+        handle_fs_event(event_info)?;
     }
     Ok(())
 }
@@ -277,10 +279,11 @@ fn try_kprobe_security_inode_link(ctx: ProbeContext) -> Result<(), i32> {
     if !(((i_mode & 0o170000u32) == 0o100000u32) || ((i_mode & 0o170000u32) == 0o120000u32)) { return Ok(()); }
     let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
     let d_name_char_ptr = unsafe { bpf_core_read!((*new_dentry_ptr).d_name.name) } as *const c_char;
-    match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
-        Ok(bytes_read) => { if bytes_read == 0 || bytes_read > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); } },
-        Err(e) => return Err(e as i32),
-    }
+    let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
+        Ok(val) => val, Err(e) => return Err(e as i32)
+    };
+    if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+
     let filepath_bytes = get_file_path_from_dentry(new_dentry_ptr)?;
     let event_info = FsEventInfo {
         event_type: FsEvent::Create, pid, inode_number: unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32,
@@ -291,7 +294,7 @@ fn try_kprobe_security_inode_link(ctx: ProbeContext) -> Result<(), i32> {
         ctime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
         nlink: unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32,
     };
-    handle_fs_event(event_info)?; // Removed ctx
+    handle_fs_event(event_info)?;
     Ok(())
 }
 
@@ -334,10 +337,11 @@ fn try_kprobe_dput(ctx: ProbeContext) -> Result<(), i32> {
                 if settings.pid_self == pid || settings.pid_shell == pid { return Ok(()); }
                 let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
                 let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_arg_ptr).d_name.name) } as *const c_char;
-                match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
-                    Ok(bytes_read) => { if bytes_read == 0 || bytes_read > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); } },
-                    Err(e) => return Err(e as i32),
-                }
+                let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
+                    Ok(val) => val, Err(e) => return Err(e as i32)
+                };
+                if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+
                 let filepath_bytes = get_file_path_from_dentry(dentry_arg_ptr)?;
                 let event_info = FsEventInfo {
                     event_type: FsEvent::Create, pid, inode_number: unsafe { bpf_core_read!((*inode_ptr).i_ino) } as u32,
@@ -348,7 +352,7 @@ fn try_kprobe_dput(ctx: ProbeContext) -> Result<(), i32> {
                     ctime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
                     nlink: unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32,
                 };
-                handle_fs_event(event_info)?; // Removed ctx
+                handle_fs_event(event_info)?;
             }
         }
     }
@@ -390,10 +394,11 @@ fn try_kprobe_notify_change(ctx: ProbeContext) -> Result<(), i32> {
     else if (ia_valid & ATTR_MTIME != 0) { triggered_events[1].1 = true; }
     let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
     let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
-    match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
-        Ok(bytes_read) => { if bytes_read == 0 || bytes_read > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); } },
-        Err(e) => return Err(e as i32),
-    }
+    let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
+        Ok(val) => val, Err(e) => return Err(e as i32)
+    };
+    if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+
     let filepath_bytes = get_file_path_from_dentry(dentry_ptr)?;
     let current_size = unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64;
     let current_atime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) };
@@ -410,7 +415,7 @@ fn try_kprobe_notify_change(ctx: ProbeContext) -> Result<(), i32> {
                 size: current_size, atime_nsec: current_atime_nsec, mtime_nsec: current_mtime_nsec,
                 ctime_nsec: current_ctime_nsec, nlink: current_nlink,
             };
-            handle_fs_event(event_info)?; // Removed ctx
+            handle_fs_event(event_info)?;
         }
     }
     Ok(())
@@ -445,10 +450,11 @@ fn try_kprobe_fsnotify_parent(ctx: ProbeContext) -> Result<(), i32> {
     if mask & FS_ATTRIB_MASK != 0 { triggered_events[2].1 = true; }
     let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
     let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
-    match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
-        Ok(bytes_read) => { if bytes_read == 0 || bytes_read > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); } },
-        Err(e) => return Err(e as i32),
-    }
+    let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
+        Ok(val) => val, Err(e) => return Err(e as i32)
+    };
+    if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+
     let filepath_bytes = get_file_path_from_dentry(dentry_ptr)?;
     let current_size = unsafe { bpf_core_read!((*inode_ptr).i_size) } as u64;
     let current_atime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_atime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_atime.tv_nsec) as u64) };
@@ -465,7 +471,7 @@ fn try_kprobe_fsnotify_parent(ctx: ProbeContext) -> Result<(), i32> {
                 size: current_size, atime_nsec: current_atime_nsec, mtime_nsec: current_mtime_nsec,
                 ctime_nsec: current_ctime_nsec, nlink: current_nlink,
             };
-            handle_fs_event(event_info)?; // Removed ctx
+            handle_fs_event(event_info)?;
         }
     }
     Ok(())
@@ -499,10 +505,11 @@ fn try_kprobe_security_inode_rename(ctx: ProbeContext) -> Result<(), i32> {
     let common_nlink = unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32;
     let mut old_filename_bytes = [0u8; FILENAME_LEN_MAX];
     let old_d_name_char_ptr = unsafe { bpf_core_read!((*old_dentry_ptr).d_name.name) } as *const c_char;
-    match unsafe { bpf_probe_read_kernel_str_bytes(old_d_name_char_ptr, &mut old_filename_bytes) } {
-        Ok(bytes_read) => { if bytes_read == 0 || bytes_read > old_filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); } },
-        Err(e) => return Err(e as i32),
-    }
+    let bytes_read_usize_old: usize = match unsafe { bpf_probe_read_kernel_str_bytes(old_d_name_char_ptr, &mut old_filename_bytes) } {
+        Ok(val) => val, Err(e) => return Err(e as i32)
+    };
+    if bytes_read_usize_old == 0 || bytes_read_usize_old > old_filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+
     let old_filepath_bytes = get_file_path_from_dentry(old_dentry_ptr)?;
     let event_info_from = FsEventInfo {
         event_type: FsEvent::MovedFrom, pid, inode_number: common_inode_number, file_mode: i_mode_val,
@@ -510,13 +517,14 @@ fn try_kprobe_security_inode_rename(ctx: ProbeContext) -> Result<(), i32> {
         size: common_size, atime_nsec: common_atime_nsec, mtime_nsec: common_mtime_nsec,
         ctime_nsec: pre_op_ctime_nsec, nlink: common_nlink,
     };
-    handle_fs_event(event_info_from)?; // Removed ctx
+    handle_fs_event(event_info_from)?;
     let mut new_filename_bytes = [0u8; FILENAME_LEN_MAX];
     let new_d_name_char_ptr = unsafe { bpf_core_read!((*new_dentry_ptr).d_name.name) } as *const c_char;
-    match unsafe { bpf_probe_read_kernel_str_bytes(new_d_name_char_ptr, &mut new_filename_bytes) } {
-        Ok(bytes_read) => { if bytes_read == 0 || bytes_read > new_filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); } },
-        Err(e) => return Err(e as i32),
-    }
+    let bytes_read_usize_new: usize = match unsafe { bpf_probe_read_kernel_str_bytes(new_d_name_char_ptr, &mut new_filename_bytes) } {
+        Ok(val) => val, Err(e) => return Err(e as i32)
+    };
+    if bytes_read_usize_new == 0 || bytes_read_usize_new > new_filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+
     let new_filepath_bytes = get_file_path_from_dentry(new_dentry_ptr)?;
     let updated_ctime_nsec = unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) };
     let event_info_to = FsEventInfo {
@@ -525,7 +533,7 @@ fn try_kprobe_security_inode_rename(ctx: ProbeContext) -> Result<(), i32> {
         filepath: new_filepath_bytes, size: common_size, atime_nsec: common_atime_nsec,
         mtime_nsec: common_mtime_nsec, ctime_nsec: updated_ctime_nsec, nlink: common_nlink,
     };
-    handle_fs_event(event_info_to)?; // Removed ctx
+    handle_fs_event(event_info_to)?;
     Ok(())
 }
 
@@ -549,10 +557,11 @@ fn try_kprobe_security_inode_unlink(ctx: ProbeContext) -> Result<(), i32> {
     if !(((i_mode_val & 0o170000u32) == 0o100000u32) || ((i_mode_val & 0o170000u32) == 0o120000u32)) { return Ok(()); }
     let mut filename_bytes = [0u8; FILENAME_LEN_MAX];
     let d_name_char_ptr = unsafe { bpf_core_read!((*dentry_ptr).d_name.name) } as *const c_char;
-    match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
-        Ok(bytes_read) => { if bytes_read == 0 || bytes_read > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); } },
-        Err(e) => return Err(e as i32),
-    }
+    let bytes_read_usize: usize = match unsafe { bpf_probe_read_kernel_str_bytes(d_name_char_ptr, &mut filename_bytes) } {
+        Ok(val) => val, Err(e) => return Err(e as i32)
+    };
+    if bytes_read_usize == 0 || bytes_read_usize > filename_bytes.len() { return Err(ERR_BPF_PROBE_READ_STR_FAILED); }
+
     let filepath_bytes = get_file_path_from_dentry(dentry_ptr)?;
     let event_info = FsEventInfo {
         event_type: FsEvent::Delete, pid,
@@ -565,15 +574,14 @@ fn try_kprobe_security_inode_unlink(ctx: ProbeContext) -> Result<(), i32> {
         ctime_nsec: unsafe { (bpf_core_read!((*inode_ptr).i_ctime.tv_sec) as u64 * 1_000_000_000) + (bpf_core_read!((*inode_ptr).i_ctime.tv_nsec) as u64) },
         nlink: unsafe { bpf_core_read!((*inode_ptr).i_nlink) } as u32,
     };
-    handle_fs_event(event_info)?; // Removed ctx
+    handle_fs_event(event_info)?;
     Ok(())
 }
 
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    // unsafe { bpf_trace_printk_unsafe(b"eBPF panic handler triggered.\0", 30) };
-    loop {} // Changed to simple loop
+    loop {}
 }
 
 #[link_section = "license"]
