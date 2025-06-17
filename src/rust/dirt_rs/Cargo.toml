@@ -28,7 +28,7 @@ log = { version = "0.4.22", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 which = { version = "6.0.0", default-features = false }
 bytes = { version = "1", default-features = false }
-serde_json = { version = "1.0", default-features = false }
+serde_json = { version = "1.0", default-features = false, features = ["std"] } # Modified line
 
 [profile.release.package.dirt_rs-ebpf]
 debug = 2
